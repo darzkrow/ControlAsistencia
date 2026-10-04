@@ -332,6 +332,36 @@ const server = http.createServer(async (req, res) => {
     route = '/' + route;
   }
 
+  // Descarga directa del APK para tablets y telefonos
+  if (rawPath === '/download/app.apk' || rawPath === '/download/apk') {
+    const candidatePaths = [
+      path.join(__dirname, '..', 'rapture-biometrics-mobile.apk'),
+      path.join(__dirname, '..', 'mobile', 'android', 'app', 'build', 'outputs', 'apk', 'release', 'app-release.apk'),
+      path.join(__dirname, '..', 'mobile', 'android', 'app', 'build', 'outputs', 'apk', 'debug', 'app-debug.apk')
+    ];
+    let apkPath = null;
+    for (const p of candidatePaths) {
+      if (fs.existsSync(p)) {
+        apkPath = p;
+        break;
+      }
+    }
+
+    if (apkPath) {
+      const stat = fs.statSync(apkPath);
+      res.writeHead(200, {
+        'Content-Type': 'application/vnd.android.package-archive',
+        'Content-Length': stat.size,
+        'Content-Disposition': 'attachment; filename="rapture-biometrics-mobile.apk"',
+        'Access-Control-Allow-Origin': '*',
+      });
+      return fs.createReadStream(apkPath).pipe(res);
+    } else {
+      res.writeHead(404, { 'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*' });
+      return res.end(JSON.stringify({ error: 'Archivo APK aun no generado o en proceso de compilacion.' }));
+    }
+  }
+
   try {
     // --------------------------------------------------------------------------
     // 1. HEALTHCHECK ENDPOINT
@@ -642,11 +672,11 @@ const server = http.createServer(async (req, res) => {
       if (alertaFraude) {
         await logAuditoria(
           null,
-          cedula,
+          null,
           emp.email || `${cedula}@rapture.local`,
           'MARCACION_MOVIL_FUERA_DE_SEDE',
           'CONTROL_ASISTENCIA_GPS',
-          `Colaborador ${emp.nombre_completo} marco a ${distanciaMetros}m de sede '${sedeRef.nombre}'. Tolerancia: ${radioPermitido}m. Coordenadas: (${latDispositivo}, ${lonDispositivo})`,
+          `Colaborador ${emp.nombre_completo} (CI: ${cedula}) marco a ${distanciaMetros}m de sede '${sedeRef.nombre}'. Tolerancia: ${radioPermitido}m. Coordenadas: (${latDispositivo}, ${lonDispositivo})`,
           clientIp
         );
       }
