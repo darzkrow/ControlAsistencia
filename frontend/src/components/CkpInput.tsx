@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { UserCheck, Delete, ArrowRight, Sparkles } from 'lucide-react';
+import { UserCheck, Delete, ArrowRight } from 'lucide-react';
 
 interface CkpInputProps {
   cedula: string;
@@ -8,13 +8,6 @@ interface CkpInputProps {
   isScanning: boolean;
   cooldownSeconds?: number;
 }
-
-const PRESET_EMPLEADOS = [
-  { cedula: '22789456', nombre: 'Juan Carlos', depto: 'Estadística' },
-  { cedula: '19543210', nombre: 'María R.', depto: 'RRHH' },
-  { cedula: '25111222', nombre: 'Carlos M.', depto: 'Informática' },
-  { cedula: '99999999', nombre: 'Visitante', depto: 'Recepción' },
-];
 
 export const CkpInput: React.FC<CkpInputProps> = ({
   cedula,
@@ -87,7 +80,7 @@ export const CkpInput: React.FC<CkpInputProps> = ({
               onSubmit();
             }
           }}
-          placeholder="Ej: 22789456"
+          placeholder="Ingrese número de cédula"
           disabled={isScanning}
           className="mono"
           style={{
@@ -125,39 +118,6 @@ export const CkpInput: React.FC<CkpInputProps> = ({
             ×
           </button>
         )}
-      </div>
-
-      {/* Quick Select Presets for Fast Testing */}
-      <div style={{ marginBottom: '18px' }}>
-        <div style={{ display: 'flex', alignItems: 'center', gap: '6px', marginBottom: '8px' }}>
-          <Sparkles size={12} color="var(--accent-amber)" />
-          <span style={{ fontSize: '0.72rem', color: 'var(--text-muted)', fontWeight: 600 }}>
-            USUARIOS DE PRUEBA RÁPIDA:
-          </span>
-        </div>
-        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: '6px' }}>
-          {PRESET_EMPLEADOS.map((emp) => (
-            <button
-              key={emp.cedula}
-              onClick={() => onCedulaChange(emp.cedula)}
-              disabled={isScanning}
-              style={{
-                padding: '6px 4px',
-                borderRadius: 'var(--radius-sm)',
-                background: cedula === emp.cedula ? 'rgba(0, 242, 254, 0.15)' : 'rgba(255, 255, 255, 0.04)',
-                border: cedula === emp.cedula ? '1px solid var(--accent-cyan)' : '1px solid var(--border-subtle)',
-                color: cedula === emp.cedula ? 'var(--accent-cyan)' : 'var(--text-secondary)',
-                fontSize: '0.7rem',
-                textAlign: 'center',
-              }}
-            >
-              <div className="mono" style={{ fontWeight: 700 }}>{emp.cedula}</div>
-              <div style={{ fontSize: '0.62rem', color: 'var(--text-muted)', textOverflow: 'ellipsis', overflow: 'hidden', whiteSpace: 'nowrap' }}>
-                {emp.nombre}
-              </div>
-            </button>
-          ))}
-        </div>
       </div>
 
       {/* Touch Screen Keypad (If Enabled) */}

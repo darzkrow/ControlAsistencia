@@ -33,12 +33,6 @@ export const AdminLogin: React.FC<AdminLoginProps> = ({ onReturnToKiosk }) => {
     }
   };
 
-  const setDemoUser = (user: string, pass: string) => {
-    setIdentifier(user);
-    setPassword(pass);
-    setErrorMsg(null);
-  };
-
   return (
     <div
       style={{
@@ -242,75 +236,6 @@ export const AdminLogin: React.FC<AdminLoginProps> = ({ onReturnToKiosk }) => {
             {loading ? 'AUTENTICANDO...' : 'INICIAR SESIÓN SEGURA'}
           </button>
         </form>
-
-        {/* Demo Fast Access Credentials */}
-        <div style={{ width: '100%', marginTop: '24px', paddingTop: '20px', borderTop: '1px solid var(--border-subtle)' }}>
-          <p style={{ fontSize: '0.72rem', color: 'var(--text-muted)', marginBottom: '10px', textAlign: 'center' }}>
-            PERFILES DE PRUEBA RBAC (Haga clic para autocompletar):
-          </p>
-          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '8px' }}>
-            <button
-              onClick={() => setDemoUser('admin', 'Admin2026!*')}
-              style={{
-                padding: '6px 8px',
-                borderRadius: '4px',
-                background: 'rgba(0, 242, 254, 0.1)',
-                border: '1px solid rgba(0, 242, 254, 0.3)',
-                color: 'var(--accent-cyan)',
-                fontSize: '0.72rem',
-                fontWeight: 700,
-                textAlign: 'left',
-              }}
-            >
-              Super Administrador
-            </button>
-            <button
-              onClick={() => setDemoUser('rrhh_directora', 'Admin2026!*')}
-              style={{
-                padding: '6px 8px',
-                borderRadius: '4px',
-                background: 'rgba(79, 172, 254, 0.1)',
-                border: '1px solid rgba(79, 172, 254, 0.3)',
-                color: 'var(--accent-blue)',
-                fontSize: '0.72rem',
-                fontWeight: 700,
-                textAlign: 'left',
-              }}
-            >
-              Administrador RRHH
-            </button>
-            <button
-              onClick={() => setDemoUser('supervisor_norte', 'Admin2026!*')}
-              style={{
-                padding: '6px 8px',
-                borderRadius: '4px',
-                background: 'rgba(0, 245, 160, 0.1)',
-                border: '1px solid rgba(0, 245, 160, 0.3)',
-                color: 'var(--accent-emerald)',
-                fontSize: '0.72rem',
-                fontWeight: 700,
-                textAlign: 'left',
-              }}
-            >
-              Supervisor Sede Norte
-            </button>
-            <button
-              onClick={() => setDemoUser('auditor_externo', 'Admin2026!*')}
-              style={{
-                padding: '6px 8px',
-                borderRadius: '4px',
-                background: 'rgba(255, 184, 0, 0.1)',
-                border: '1px solid rgba(255, 184, 0, 0.3)',
-                color: 'var(--accent-amber)',
-                fontSize: '0.72rem',
-                fontWeight: 700,
-                textAlign: 'left',
-              }}
-            >
-              Auditor de Cumplimiento
-            </button>
-          </div>
-        </div>
 
         {/* Security badge footer */}
         <div

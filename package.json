@@ -1,0 +1,27 @@
+{
+  "name": "captador_huellas-master",
+  "version": "1.0.0",
+  "description": "Sistema corporativo de registro de jornada laboral, control de acceso biometrico multimodal y gestion organizativa integral. El sistema esta compuesto por un **Kiosko Interactivo y Portal Administrativo en React 19 + TypeScript + Vite** y un **Backend Asincrono de Alto Rendimiento en Rust (Axum 0.7 + Tokio + SQLx + OpenCV)** respaldado por **PostgreSQL 16**.",
+  "main": "index.js",
+  "directories": {
+    "doc": "docs"
+  },
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/darzkrow/ControlAsistencia.git"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "type": "commonjs",
+  "bugs": {
+    "url": "https://github.com/darzkrow/ControlAsistencia/issues"
+  },
+  "homepage": "https://github.com/darzkrow/ControlAsistencia#readme",
+  "dependencies": {
+    "pg": "^8.23.1"
+  }
+}

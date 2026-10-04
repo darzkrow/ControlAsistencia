@@ -112,50 +112,28 @@ export const App: React.FC = () => {
       };
       setRecentEvents((prev) => [newEvent, ...prev.slice(0, 7)]);
       setCedula('');
-    } catch {
-      // Simulation fallback when backend is temporarily offline
+    } catch (err: unknown) {
       setIsScanning(false);
+      const errorMsg = err instanceof Error ? err.message : 'Error desconocido de conexión';
+      console.error('[TERMINAL] Fallo en la comunicación con el servidor central:', errorMsg);
 
-      const isDemoEmployee = ['22789456', '19543210', '25111222'].includes(cedula);
-      const demoNames: Record<string, { nombre: string; depto: string }> = {
-        '22789456': { nombre: 'Juan Carlos Pérez Gómez', depto: 'Gerencia de estadística' },
-        '19543210': { nombre: 'María Alejandra Rodríguez', depto: 'Recursos Humanos' },
-        '25111222': { nombre: 'Carlos Eduardo Mendoza', depto: 'Tecnología e Informática' },
+      const errorResponse: EscaneoResponse = {
+        es_empleado: false,
+        mensaje: 'Error de comunicación con el servidor central. No se pudo registrar la asistencia en la base de datos.',
+        tipo_evento: 'rechazado',
       };
 
-      const demoInfo = demoNames[cedula] || { nombre: 'Colaborador Demo', depto: 'Operaciones' };
-      const simulatedResponse: EscaneoResponse = isDemoEmployee
-        ? {
-            es_empleado: true,
-            mensaje: `¡Bienvenido/a, ${demoInfo.nombre}! Entrada registrada.`,
-            nombre_completo: demoInfo.nombre,
-            departamento: demoInfo.depto,
-            tipo_evento: 'entrada',
-            foto_detectada_b64: fotoB64?.split(',')[1] || undefined,
-            minutos_acumulados: 240,
-          }
-        : {
-            es_empleado: false,
-            mensaje: 'Bienvenido a Rapture. Por favor diríjase a la recepción para registrar su visita.',
-            tipo_evento: 'visitante',
-          };
-
-      setScanResult(simulatedResponse);
-      if (simulatedResponse.es_empleado) {
-        if (soundEnabled) biometricAudio.playSuccess();
-      } else {
-        if (soundEnabled) biometricAudio.playError();
-      }
+      setScanResult(errorResponse);
+      if (soundEnabled) biometricAudio.playError();
 
       const newEvent: EventoReciente = {
         id: Math.random().toString(36).substring(2, 9),
         cedula: idNum,
-        nombre: simulatedResponse.nombre_completo || 'Visitante',
-        departamento: simulatedResponse.departamento,
-        tipo: simulatedResponse.tipo_evento,
+        nombre: 'Conexión Fallida',
+        tipo: 'rechazado',
         timestamp: new Date().toLocaleTimeString('es-ES', { hour: '2-digit', minute: '2-digit', second: '2-digit' }),
         metodo: mode,
-        exito: simulatedResponse.es_empleado,
+        exito: false,
       };
       setRecentEvents((prev) => [newEvent, ...prev.slice(0, 7)]);
       setCedula('');

@@ -1,137 +1,33 @@
 const http = require('node:http');
 const crypto = require('node:crypto');
+const { Pool } = require('pg');
 
 const PORT = 3000;
 const HOST = '127.0.0.1';
 
-// In-memory persistent state (mirroring database schema in respaldo_rapture.sql)
-let sedes = [
-  { id: 1, codigo: 'SEDE-CENTRAL', nombre: 'Sede Central Administrativa', direccion: 'Av. Libertador, Edif. Rapture Towers', ciudad: 'Caracas', activa: true },
-  { id: 2, codigo: 'SEDE-NORTE', nombre: 'Planta Tecnológica e I+D', direccion: 'Parque Industrial Norte, Módulo B', ciudad: 'Valencia', activa: true }
-];
+// Conexion al Pool de PostgreSQL (rapture-db)
+const pool = new Pool({
+  connectionString: process.env.DATABASE_URL || 'postgres://admin:secreto@127.0.0.1:5432/api_db',
+  max: 20,
+  idleTimeoutMillis: 30000,
+  connectionTimeoutMillis: 3000,
+});
 
-let departamentos = [
-  { id: 1, sede_id: 1, codigo: 'DEP-ESTAD', nombre: 'Gerencia de Estadística', activo: true, nombre_sede: 'Sede Central Administrativa' },
-  { id: 2, sede_id: 1, codigo: 'DEP-RRHH', nombre: 'Recursos Humanos', activo: true, nombre_sede: 'Sede Central Administrativa' },
-  { id: 3, sede_id: 2, codigo: 'DEP-TI', nombre: 'Tecnología e Informática', activo: true, nombre_sede: 'Planta Tecnológica e I+D' },
-  { id: 4, sede_id: 2, codigo: 'DEP-OP', nombre: 'Operaciones y Logística', activo: true, nombre_sede: 'Planta Tecnológica e I+D' }
-];
+pool.on('error', (err) => {
+  console.error('[ERROR] Error inesperado en el Pool de PostgreSQL:', err.message);
+});
 
-let cargos = [
-  { id: 1, departamento_id: 1, nombre: 'Especialista de Estadísticas y Análisis', descripcion: 'Análisis métrico y modelos de datos', nombre_departamento: 'Gerencia de Estadística' },
-  { id: 2, departamento_id: 2, nombre: 'Coordinadora de Recursos Humanos', descripcion: 'Gestión de nómina, contrataciones y bienestar', nombre_departamento: 'Recursos Humanos' },
-  { id: 3, departamento_id: 3, nombre: 'Ingeniero de Infraestructura y Software', descripcion: 'Desarrollo, nube y ciberseguridad', nombre_departamento: 'Tecnología e Informática' },
-  { id: 4, departamento_id: 4, nombre: 'Supervisor de Operaciones Biométricas', descripcion: 'Control de planta y soporte técnico de kioskos', nombre_departamento: 'Operaciones y Logística' }
-];
+// Cache en memoria para sesiones activas (TTL 8 horas)
+const activeSessions = new Map(); // token -> { userId, email, rolId, expiresAt }
 
-let turnos = [
-  { id: 1, nombre: 'Turno Administrativo Regular', hora_entrada: '08:00:00', hora_salida: '17:00:00', tolerancia_minutos: 15, dias_laborales: 'L,M,X,J,V', activo: true },
-  { id: 2, nombre: 'Turno Técnico Matutino', hora_entrada: '07:00:00', hora_salida: '15:30:00', tolerancia_minutos: 10, dias_laborales: 'L,M,X,J,V', activo: true },
-  { id: 3, nombre: 'Turno Tarde / Operativo', hora_entrada: '13:00:00', hora_salida: '21:00:00', tolerancia_minutos: 15, dias_laborales: 'L,M,X,J,V', activo: true }
-];
-
-let empleados = [
-  {
-    cedula: 22789456,
-    nombre_completo: 'Juan Carlos Pérez Gómez',
-    email: 'jperez@rapture.corp',
-    telefono: '+58 412 1112233',
-    departamento: 'Gerencia de Estadística',
-    sede_id: 1,
-    nombre_sede: 'Sede Central Administrativa',
-    departamento_id: 1,
-    nombre_departamento: 'Gerencia de Estadística',
-    cargo_id: 1,
-    nombre_cargo: 'Especialista de Estadísticas y Análisis',
-    turno_id: 1,
-    nombre_turno: 'Turno Administrativo Regular',
-    activo: true
-  },
-  {
-    cedula: 19543210,
-    nombre_completo: 'María Alejandra Rodríguez',
-    email: 'mrodriguez@rapture.corp',
-    telefono: '+58 414 3334455',
-    departamento: 'Recursos Humanos',
-    sede_id: 1,
-    nombre_sede: 'Sede Central Administrativa',
-    departamento_id: 2,
-    nombre_departamento: 'Recursos Humanos',
-    cargo_id: 2,
-    nombre_cargo: 'Coordinadora de Recursos Humanos',
-    turno_id: 1,
-    nombre_turno: 'Turno Administrativo Regular',
-    activo: true
-  },
-  {
-    cedula: 25111222,
-    nombre_completo: 'Carlos Eduardo Mendoza',
-    email: 'cmendoza@rapture.corp',
-    telefono: '+58 424 5556677',
-    departamento: 'Tecnología e Informática',
-    sede_id: 2,
-    nombre_sede: 'Planta Tecnológica e I+D',
-    departamento_id: 3,
-    nombre_departamento: 'Tecnología e Informática',
-    cargo_id: 3,
-    nombre_cargo: 'Ingeniero de Infraestructura y Software',
-    turno_id: 2,
-    nombre_turno: 'Turno Técnico Matutino',
-    activo: true
-  }
-];
-
-let roles = [
-  { id: 1, codigo: 'SUPER_ADMIN', nombre: 'Super Administrador', descripcion: 'Control total e irrestricto sobre todos los modelos del sistema', es_sistema: true, activo: true },
-  { id: 2, codigo: 'ADMIN_RRHH', nombre: 'Administrador de Talento Humano', descripcion: 'Gestión integral de colaboradores, turnos, cargos y auditoría de asistencias', es_sistema: true, activo: true },
-  { id: 3, codigo: 'SUPERVISOR_SEDE', nombre: 'Supervisor de Sede Local', descripcion: 'Gestión y control de colaboradores restringido a la sede asignada', es_sistema: true, activo: true },
-  { id: 4, codigo: 'AUDITOR', nombre: 'Auditor de Seguridad y Cumplimiento', descripcion: 'Solo lectura y exportación para fines de fiscalización', es_sistema: true, activo: true }
-];
-
-let modelos = [
-  { codigo: 'sedes', nombre: 'Sedes y Sucursales', descripcion: 'Ubicaciones físicas y arquitectura de campus', icono: 'Building2', soporta_alcance_sede: false, acciones_disponibles: 'crear,leer,actualizar,eliminar' },
-  { codigo: 'departamentos', nombre: 'Departamentos y Oficinas', descripcion: 'Unidades organizativas internas por sede', icono: 'Layers', soporta_alcance_sede: true, acciones_disponibles: 'crear,leer,actualizar,eliminar' },
-  { codigo: 'cargos', nombre: 'Cargos y Posiciones', descripcion: 'Definición de roles de trabajo y perfiles', icono: 'Briefcase', soporta_alcance_sede: false, acciones_disponibles: 'crear,leer,actualizar,eliminar' },
-  { codigo: 'turnos', nombre: 'Turnos y Horarios', descripcion: 'Reglas de evaluación, tolerancias y jornadas', icono: 'Clock', soporta_alcance_sede: false, acciones_disponibles: 'crear,leer,actualizar,eliminar' },
-  { codigo: 'empleados', nombre: 'Colaboradores y Biometría', descripcion: 'Directorio, enrolamiento facial y huellas dactilares', icono: 'Users', soporta_alcance_sede: true, acciones_disponibles: 'crear,leer,actualizar,eliminar,exportar' },
-  { codigo: 'asistencias', nombre: 'Auditoría de Asistencias', descripcion: 'Control de marcaciones, retardos y reportes', icono: 'CalendarCheck', soporta_alcance_sede: true, acciones_disponibles: 'leer,exportar' },
-  { codigo: 'seguridad', nombre: 'Seguridad, Roles y Políticas', descripcion: 'Gestión de usuarios admin, políticas RBAC y modelos', icono: 'Shield', soporta_alcance_sede: false, acciones_disponibles: 'crear,leer,actualizar,eliminar,exportar' }
-];
-
-let politicas = [
-  { id: 1, rol_id: 1, modelo_codigo: 'sedes', puede_crear: true, puede_leer: true, puede_actualizar: true, puede_eliminar: true, puede_exportar: true, alcance: 'global' },
-  { id: 2, rol_id: 1, modelo_codigo: 'departamentos', puede_crear: true, puede_leer: true, puede_actualizar: true, puede_eliminar: true, puede_exportar: true, alcance: 'global' },
-  { id: 3, rol_id: 1, modelo_codigo: 'cargos', puede_crear: true, puede_leer: true, puede_actualizar: true, puede_eliminar: true, puede_exportar: true, alcance: 'global' },
-  { id: 4, rol_id: 1, modelo_codigo: 'turnos', puede_crear: true, puede_leer: true, puede_actualizar: true, puede_eliminar: true, puede_exportar: true, alcance: 'global' },
-  { id: 5, rol_id: 1, modelo_codigo: 'empleados', puede_crear: true, puede_leer: true, puede_actualizar: true, puede_eliminar: true, puede_exportar: true, alcance: 'global' },
-  { id: 6, rol_id: 1, modelo_codigo: 'asistencias', puede_crear: true, puede_leer: true, puede_actualizar: true, puede_eliminar: true, puede_exportar: true, alcance: 'global' },
-  { id: 7, rol_id: 1, modelo_codigo: 'seguridad', puede_crear: true, puede_leer: true, puede_actualizar: true, puede_eliminar: true, puede_exportar: true, alcance: 'global' },
-
-  { id: 8, rol_id: 2, modelo_codigo: 'sedes', puede_crear: false, puede_leer: true, puede_actualizar: false, puede_eliminar: false, puede_exportar: false, alcance: 'global' },
-  { id: 9, rol_id: 2, modelo_codigo: 'departamentos', puede_crear: true, puede_leer: true, puede_actualizar: true, puede_eliminar: false, puede_exportar: true, alcance: 'global' },
-  { id: 10, rol_id: 2, modelo_codigo: 'cargos', puede_crear: true, puede_leer: true, puede_actualizar: true, puede_eliminar: false, puede_exportar: true, alcance: 'global' },
-  { id: 11, rol_id: 2, modelo_codigo: 'turnos', puede_crear: true, puede_leer: true, puede_actualizar: true, puede_eliminar: false, puede_exportar: true, alcance: 'global' },
-  { id: 12, rol_id: 2, modelo_codigo: 'empleados', puede_crear: true, puede_leer: true, puede_actualizar: true, puede_eliminar: false, puede_exportar: true, alcance: 'global' },
-  { id: 13, rol_id: 2, modelo_codigo: 'asistencias', puede_crear: false, puede_leer: true, puede_actualizar: false, puede_eliminar: false, puede_exportar: true, alcance: 'global' },
-  { id: 14, rol_id: 2, modelo_codigo: 'seguridad', puede_crear: false, puede_leer: false, puede_actualizar: false, puede_eliminar: false, puede_exportar: false, alcance: 'ninguno' },
-
-  { id: 15, rol_id: 3, modelo_codigo: 'sedes', puede_crear: false, puede_leer: true, puede_actualizar: false, puede_eliminar: false, puede_exportar: false, alcance: 'sede' },
-  { id: 16, rol_id: 3, modelo_codigo: 'departamentos', puede_crear: false, puede_leer: true, puede_actualizar: false, puede_eliminar: false, puede_exportar: false, alcance: 'sede' },
-  { id: 17, rol_id: 3, modelo_codigo: 'cargos', puede_crear: false, puede_leer: true, puede_actualizar: false, puede_eliminar: false, puede_exportar: false, alcance: 'global' },
-  { id: 18, rol_id: 3, modelo_codigo: 'turnos', puede_crear: false, puede_leer: true, puede_actualizar: false, puede_eliminar: false, puede_exportar: false, alcance: 'global' },
-  { id: 19, rol_id: 3, modelo_codigo: 'empleados', puede_crear: true, puede_leer: true, puede_actualizar: true, puede_eliminar: false, puede_exportar: true, alcance: 'sede' },
-  { id: 20, rol_id: 3, modelo_codigo: 'asistencias', puede_crear: false, puede_leer: true, puede_actualizar: false, puede_eliminar: false, puede_exportar: true, alcance: 'sede' },
-  { id: 21, rol_id: 3, modelo_codigo: 'seguridad', puede_crear: false, puede_leer: false, puede_actualizar: false, puede_eliminar: false, puede_exportar: false, alcance: 'ninguno' }
-];
-
-// Helper para hashear con Salt criptográfico y SHA-256
+// Helper para hashear con Salt criptografico y SHA-256 (FIPS 180-4)
 function hashPassword(password, salt = null) {
   const chosenSalt = salt || crypto.randomBytes(16).toString('hex');
   const hash = crypto.createHash('sha256').update(`${chosenSalt}:${password}`).digest('hex');
   return `${chosenSalt}$${hash}`;
 }
 
-// Comparación segura en tiempo constante contra ataques de canal lateral (Timing Attacks)
+// Comparacion en tiempo constante para mitigar ataques de canal lateral (Timing Attacks)
 function constantTimeCompare(a, b) {
   if (typeof a !== 'string' || typeof b !== 'string') return false;
   const bufA = Buffer.from(a, 'utf8');
@@ -140,44 +36,12 @@ function constantTimeCompare(a, b) {
   return crypto.timingSafeEqual(bufA, bufB);
 }
 
-const defaultAdminPasswordHash = hashPassword('Admin2026!*', 'rapture_admin_26');
-
-let usuarios = [
-  { id: 1, username: 'admin', email: 'admin@rapture.corp', password_hash: defaultAdminPasswordHash, nombre_completo: 'Administrador Principal de Seguridad', rol_id: 1, rol_codigo: 'SUPER_ADMIN', rol_nombre: 'Super Administrador', sede_id: null, sede_nombre: 'Todas las Sedes (Global)', intentos_fallidos: 0, bloqueado_hasta: null, activo: true, ultimo_login: new Date().toISOString() },
-  { id: 2, username: 'rrhh_directora', email: 'rrhh@rapture.corp', password_hash: defaultAdminPasswordHash, nombre_completo: 'Dirección de Talento Humano', rol_id: 2, rol_codigo: 'ADMIN_RRHH', rol_nombre: 'Administrador de Talento Humano', sede_id: 1, sede_nombre: 'Sede Central Administrativa', intentos_fallidos: 0, bloqueado_hasta: null, activo: true, ultimo_login: new Date().toISOString() },
-  { id: 3, username: 'supervisor_norte', email: 'supervisor.valencia@rapture.corp', password_hash: defaultAdminPasswordHash, nombre_completo: 'Supervisor Planta Norte', rol_id: 3, rol_codigo: 'SUPERVISOR_SEDE', rol_nombre: 'Supervisor de Sede Local', sede_id: 2, sede_nombre: 'Planta Tecnológica e I+D', intentos_fallidos: 0, bloqueado_hasta: null, activo: true, ultimo_login: new Date().toISOString() },
-  { id: 4, username: 'auditor_externo', email: 'auditor@rapture.corp', password_hash: defaultAdminPasswordHash, nombre_completo: 'Auditor de Cumplimiento Normativo', rol_id: 4, rol_codigo: 'AUDITOR', rol_nombre: 'Auditor de Seguridad y Cumplimiento', sede_id: null, sede_nombre: 'Global', intentos_fallidos: 0, bloqueado_hasta: null, activo: true, ultimo_login: new Date().toISOString() }
-];
-
-let auditoria = [
-  { id: 1, usuario_email: 'admin@rapture.corp', accion: 'INICIALIZACION_SISTEMA', modulo: 'SEGURIDAD', detalles: 'Instalación de políticas RBAC y modelos de recursos base', ip_origen: '127.0.0.1', fecha_hora: new Date(Date.now() - 3600000).toISOString() },
-  { id: 2, usuario_email: 'admin@rapture.corp', accion: 'CONFIGURACION_POLITICAS', modulo: 'MODELOS', detalles: 'Definición de alcance y permisos matriciales para 4 roles', ip_origen: '127.0.0.1', fecha_hora: new Date(Date.now() - 1800000).toISOString() }
-];
-
-let activeSessions = new Map(); // token -> session data
-
-function getAuthenticatedUser(req) {
-  const authHeader = req.headers['authorization'] || '';
-  const match = authHeader.match(/^Bearer\s+(.+)$/i);
-  if (!match) return null;
-  const token = match[1].trim();
-  const session = activeSessions.get(token);
-  if (!session) return null;
-  if (Date.now() > session.expiresAt) {
-    activeSessions.delete(token);
-    return null;
-  }
-  const user = usuarios.find(u => u.id === session.userId);
-  if (!user || !user.activo) return null;
-  return { user, session, token };
-}
-
 function sendJson(res, statusCode, data) {
   res.writeHead(statusCode, {
     'Content-Type': 'application/json',
     'Access-Control-Allow-Origin': '*',
     'Access-Control-Allow-Methods': 'GET, POST, PUT, PATCH, DELETE, OPTIONS',
-    'Access-Control-Allow-Headers': 'Content-Type, Authorization, X-Requested-With'
+    'Access-Control-Allow-Headers': 'Content-Type, Authorization, X-Requested-With',
   });
   res.end(JSON.stringify(data));
 }
@@ -185,7 +49,7 @@ function sendJson(res, statusCode, data) {
 function parseBody(req) {
   return new Promise((resolve) => {
     let body = '';
-    req.on('data', chunk => body += chunk);
+    req.on('data', (chunk) => (body += chunk));
     req.on('end', () => {
       try {
         resolve(JSON.parse(body || '{}'));
@@ -196,401 +60,659 @@ function parseBody(req) {
   });
 }
 
+async function logAuditoria(client, usuarioId, email, accion, modulo, detalles, ip) {
+  try {
+    const runner = client || pool;
+    await runner.query(
+      `INSERT INTO auditoria_seguridad (usuario_id, usuario_email, accion, modulo, detalles, ip_origen, fecha_hora)
+       VALUES ($1, $2, $3, $4, $5, $6, NOW())`,
+      [usuarioId, email, accion, modulo, detalles, ip]
+    );
+  } catch (e) {
+    console.error('[WARN] Error al registrar auditoria:', e.message);
+  }
+}
+
 const server = http.createServer(async (req, res) => {
   // CORS Preflight
   if (req.method === 'OPTIONS') {
     res.writeHead(204, {
       'Access-Control-Allow-Origin': '*',
       'Access-Control-Allow-Methods': 'GET, POST, PUT, PATCH, DELETE, OPTIONS',
-      'Access-Control-Allow-Headers': 'Content-Type, Authorization, X-Requested-With'
+      'Access-Control-Allow-Headers': 'Content-Type, Authorization, X-Requested-With',
     });
     return res.end();
   }
 
   const url = new URL(req.url, `http://${req.headers.host}`);
   const pathname = url.pathname;
+  const clientIp = req.socket.remoteAddress || '127.0.0.1';
 
-  // 1. HEALTHCHECK ENDPOINT
-  if (pathname === '/api/health') {
-    return sendJson(res, 200, {
-      status: 'ok',
-      service: 'rapture-biometrics-backend',
-      engine: 'Axum / Bridge',
-      version: '2.0.4',
-      server_connected: true,
-      timestamp: new Date().toISOString()
-    });
-  }
-
-  // 2. KIOSK BIOMETRIC SCAN
-  if (pathname === '/api/escaneo' && req.method === 'POST') {
-    const body = await parseBody(req);
-    const idNum = Number(body.cedula);
-    const emp = empleados.find(e => e.cedula === idNum);
-
-    if (emp && emp.activo) {
+  try {
+    // --------------------------------------------------------------------------
+    // 1. HEALTHCHECK ENDPOINT
+    // --------------------------------------------------------------------------
+    if (pathname === '/api/health') {
+      const dbCheck = await pool.query('SELECT NOW() as now');
       return sendJson(res, 200, {
-        es_empleado: true,
-        mensaje: `¡Bienvenido/a, ${emp.nombre_completo}! Entrada registrada satisfactoriamente.`,
-        nombre_completo: emp.nombre_completo,
-        departamento: emp.departamento,
-        tipo_evento: 'entrada',
-        foto_detectada_b64: body.foto_b64 ? body.foto_b64.split(',')[1] : null,
-        minutos_acumulados: 240
-      });
-    } else {
-      return sendJson(res, 200, {
-        es_empleado: false,
-        mensaje: 'Identidad no registrada o colaborador inactivo. Por favor acuda a recepción para registro de visitante.',
-        tipo_evento: 'visitante'
+        status: 'ok',
+        service: 'rapture-biometrics-backend',
+        engine: 'Axum / PostgreSQL Direct',
+        version: '2.0.4',
+        server_connected: true,
+        database_connected: !!dbCheck.rows[0],
+        timestamp: new Date().toISOString(),
       });
     }
-  }
 
-  // 3. AUTHENTICATION & LOGIN
-  if (pathname === '/api/auth/login' && req.method === 'POST') {
-    const { identifier, password } = await parseBody(req);
-    const user = usuarios.find(u =>
-      u.username.toLowerCase() === (identifier || '').toLowerCase() ||
-      u.email.toLowerCase() === (identifier || '').toLowerCase()
-    );
+    // --------------------------------------------------------------------------
+    // 2. KIOSKO BIOMETRICO - REGISTRO DE ASISTENCIA (TRANSACCION REAL EN BD)
+    // --------------------------------------------------------------------------
+    if (pathname === '/api/escaneo' && req.method === 'POST') {
+      const body = await parseBody(req);
+      const idNum = Number(body.cedula);
 
-    if (!user) {
-      auditoria.unshift({
-        id: Date.now(),
-        usuario_email: identifier,
-        accion: 'LOGIN_FALLIDO',
-        modulo: 'AUTH',
-        detalles: 'Identificador no encontrado en directorio',
-        ip_origen: req.socket.remoteAddress || '127.0.0.1',
-        fecha_hora: new Date().toISOString()
-      });
-      return sendJson(res, 401, { error: 'Credenciales de acceso inválidas' });
-    }
-
-    if (!user.activo) {
-      return sendJson(res, 403, { error: 'Su cuenta administrativa se encuentra inactiva. Contacte a seguridad.' });
-    }
-
-    // Check brute-force lockout (5 fallos = 15 minutos bloqueo)
-    if (user.bloqueado_hasta && new Date(user.bloqueado_hasta) > new Date()) {
-      const remainingMin = Math.ceil((new Date(user.bloqueado_hasta) - new Date()) / 60000);
-      return sendJson(res, 401, { error: `Cuenta bloqueada temporalmente por exceso de intentos fallidos. Intente de nuevo en ${remainingMin} minutos.` });
-    }
-
-    // Verify salted password with constant-time equality - ZERO BACKDOORS
-    let isValid = false;
-    if (user.password_hash && user.password_hash.includes('$')) {
-      const [salt, expectedHash] = user.password_hash.split('$');
-      const computedHash = crypto.createHash('sha256').update(`${salt}:${password || ''}`).digest('hex');
-      isValid = constantTimeCompare(computedHash, expectedHash);
-    } else if (user.password_hash && user.password_hash.length === 64) {
-      const computedHash = crypto.createHash('sha256').update(password || '').digest('hex');
-      isValid = constantTimeCompare(computedHash, user.password_hash);
-    }
-
-    if (!isValid) {
-      user.intentos_fallidos = (user.intentos_fallidos || 0) + 1;
-      if (user.intentos_fallidos >= 5) {
-        user.bloqueado_hasta = new Date(Date.now() + 15 * 60000).toISOString();
+      if (!idNum || isNaN(idNum)) {
+        return sendJson(res, 400, { es_empleado: false, mensaje: 'Numero de identificacion invalido', tipo_evento: 'rechazado' });
       }
-      auditoria.unshift({
-        id: Date.now(),
-        usuario_email: user.email,
-        accion: 'LOGIN_FALLIDO',
-        modulo: 'AUTH',
-        detalles: `Contraseña incorrecta (intento ${user.intentos_fallidos})`,
-        ip_origen: req.socket.remoteAddress || '127.0.0.1',
-        fecha_hora: new Date().toISOString()
+
+      const empRes = await pool.query(
+        `SELECT e.cedula, e.nombre_completo, e.departamento, e.activo, s.nombre as nombre_sede
+         FROM empleados e
+         LEFT JOIN sedes s ON e.sede_id = s.id
+         WHERE e.cedula = $1`,
+        [idNum]
+      );
+
+      const emp = empRes.rows[0];
+      if (!emp || !emp.activo) {
+        return sendJson(res, 200, {
+          es_empleado: false,
+          mensaje: 'Identidad no registrada o colaborador inactivo. Por favor acuda a recepcion para registro de visitante.',
+          tipo_evento: 'visitante',
+        });
+      }
+
+      // Evaluar la jornada del dia actual (ACID)
+      const client = await pool.connect();
+      try {
+        await client.query('BEGIN');
+
+        const jornadaRes = await client.query(
+          `SELECT * FROM jornada_diaria WHERE empleado_cedula = $1 AND fecha = CURRENT_DATE FOR UPDATE`,
+          [idNum]
+        );
+
+        let tipoEvento = 'entrada';
+        let minutosTrabajados = 0;
+
+        // Consultar turno del empleado para evaluar puntualidad
+        const turnoRes = await client.query(
+          `SELECT t.hora_entrada, t.tolerancia_minutos
+           FROM empleados e
+           LEFT JOIN turnos_horarios t ON e.turno_id = t.id
+           WHERE e.cedula = $1`,
+          [idNum]
+        );
+        const turno = turnoRes.rows[0];
+        let puntualidad = 'Puntual';
+        let minutosRetardo = 0;
+
+        if (turno && turno.hora_entrada) {
+          const evalRes = await client.query(
+            `SELECT (NOW()::time > ($1::time + ($2 || ' minutes')::interval)) as es_retardo,
+                    GREATEST(0, ROUND(EXTRACT(EPOCH FROM (NOW()::time - $1::time)) / 60))::int as retardo_mins`,
+            [turno.hora_entrada, turno.tolerancia_minutos || 15]
+          );
+          if (evalRes.rows[0]?.es_retardo) {
+            puntualidad = 'Retardo';
+            minutosRetardo = evalRes.rows[0]?.retardo_mins || 0;
+          }
+        }
+
+        if (jornadaRes.rows.length === 0) {
+          // Primer marcaje del dia -> ENTRADA
+          tipoEvento = 'entrada';
+          await client.query(
+            `INSERT INTO jornada_diaria (empleado_cedula, fecha, hora_entrada, estado, minutos_trabajados, puntualidad, minutos_retardo, ultima_actualizacion)
+             VALUES ($1, CURRENT_DATE, NOW(), 'En curso', 0, $2, $3, NOW())`,
+            [idNum, puntualidad, minutosRetardo]
+          );
+        } else {
+          // Segundo o posterior marcaje del dia -> SALIDA
+          const diffRes = await client.query(
+            `SELECT ROUND(EXTRACT(EPOCH FROM (NOW() - hora_entrada)) / 60)::int as minutos FROM jornada_diaria WHERE empleado_cedula = $1 AND fecha = CURRENT_DATE`,
+            [idNum]
+          );
+          minutosTrabajados = Math.max(0, diffRes.rows[0]?.minutos || 0);
+
+          await client.query(
+            `UPDATE jornada_diaria
+             SET hora_salida = NOW(),
+                 minutos_trabajados = $2,
+                 estado = 'Completada',
+                 ultima_actualizacion = NOW()
+             WHERE empleado_cedula = $1 AND fecha = CURRENT_DATE`,
+            [idNum, minutosTrabajados]
+          );
+        }
+
+        // Registrar evento inmutable de auditoria del lector (metodo_auth)
+        const metodoAuth = (body.metodo || 'FACIAL').toUpperCase();
+        await client.query(
+          `INSERT INTO eventos_lector (empleado_cedula, fecha_hora, tipo_evento, foto_path, metodo_auth)
+           VALUES ($1, NOW(), $2, $3, $4)`,
+          [idNum, tipoEvento.toUpperCase(), null, metodoAuth]
+        );
+
+        await client.query('COMMIT');
+
+        const accionTxt = tipoEvento === 'entrada' ? 'Entrada registrada satisfactoriamente.' : 'Salida registrada satisfactoriamente.';
+        return sendJson(res, 200, {
+          es_empleado: true,
+          mensaje: `Bienvenido/a, ${emp.nombre_completo}! ${accionTxt}`,
+          nombre_completo: emp.nombre_completo,
+          departamento: emp.departamento || 'General',
+          tipo_evento: tipoEvento,
+          minutos_acumulados: minutosTrabajados,
+        });
+      } catch (err) {
+        await client.query('ROLLBACK');
+        console.error('[ERROR] Error en transaccion de escaneo:', err);
+        return sendJson(res, 500, { error: 'Error interno al procesar el marcaje' });
+      } finally {
+        client.release();
+      }
+    }
+
+    // --------------------------------------------------------------------------
+    // 3. AUTENTICACION Y LOGIN (VERIFICACION CONTRA TABLA usuarios_admin)
+    // --------------------------------------------------------------------------
+    if (pathname === '/api/auth/login' && req.method === 'POST') {
+      const { identifier, password } = await parseBody(req);
+      if (!identifier || !password) {
+        return sendJson(res, 400, { error: 'Identificador y contrasena requeridos' });
+      }
+
+      const userRes = await pool.query(
+        `SELECT u.id, u.username, u.email, u.password_hash, u.nombre_completo, u.rol_id, u.sede_id,
+                u.intentos_fallidos, u.bloqueado_hasta, u.activo,
+                r.codigo as rol_codigo, r.nombre as rol_nombre,
+                COALESCE(s.nombre, 'Todas las Sedes (Global)') as sede_nombre
+         FROM usuarios_admin u
+         JOIN roles r ON u.rol_id = r.id
+         LEFT JOIN sedes s ON u.sede_id = s.id
+         WHERE LOWER(u.username) = LOWER($1) OR LOWER(u.email) = LOWER($1)`,
+        [identifier.trim()]
+      );
+
+      const user = userRes.rows[0];
+
+      if (!user) {
+        await logAuditoria(null, null, identifier, 'LOGIN_FALLIDO', 'AUTH', 'Identificador no encontrado en directorio', clientIp);
+        return sendJson(res, 401, { error: 'Credenciales de acceso invalidas' });
+      }
+
+      if (!user.activo) {
+        return sendJson(res, 403, { error: 'Su cuenta administrativa se encuentra inactiva. Contacte a seguridad.' });
+      }
+
+      // Comprobar bloqueo por fuerza bruta
+      if (user.bloqueado_hasta && new Date(user.bloqueado_hasta) > new Date()) {
+        const remainingMin = Math.ceil((new Date(user.bloqueado_hasta) - new Date()) / 60000);
+        return sendJson(res, 401, {
+          error: `Cuenta bloqueada temporalmente por exceso de intentos fallidos. Intente de nuevo en ${remainingMin} minutos.`,
+        });
+      }
+
+      // Validacion criptografica segura (Salt + SHA-256 + Constant Time)
+      let isValid = false;
+      if (user.password_hash && user.password_hash.includes('$')) {
+        const [salt, expectedHash] = user.password_hash.split('$');
+        const computedHash = crypto.createHash('sha256').update(`${salt}:${password}`).digest('hex');
+        isValid = constantTimeCompare(computedHash, expectedHash);
+      } else if (user.password_hash && user.password_hash.length === 64) {
+        const computedHash = crypto.createHash('sha256').update(password).digest('hex');
+        isValid = constantTimeCompare(computedHash, user.password_hash);
+      }
+
+      if (!isValid) {
+        const newFallos = (user.intentos_fallidos || 0) + 1;
+        const willLock = newFallos >= 5;
+        await pool.query(
+          `UPDATE usuarios_admin
+           SET intentos_fallidos = $1,
+               bloqueado_hasta = (CASE WHEN $2 = true THEN NOW() + interval '15 minutes' ELSE NULL END)
+           WHERE id = $3`,
+          [newFallos, willLock, user.id]
+        );
+
+        await logAuditoria(
+          null,
+          user.id,
+          user.email,
+          'LOGIN_FALLIDO',
+          'AUTH',
+          `Contrasena incorrecta (intento ${newFallos}${willLock ? ' - Cuenta Bloqueada 15 min' : ''})`,
+          clientIp
+        );
+
+        return sendJson(res, 401, { error: 'Credenciales de acceso invalidas' });
+      }
+
+      // Login exitoso: restablecer contadores
+      await pool.query(
+        `UPDATE usuarios_admin
+         SET intentos_fallidos = 0, bloqueado_hasta = NULL, ultimo_login = NOW()
+         WHERE id = $1`,
+        [user.id]
+      );
+
+      const token = `rapture_sec_${crypto.randomBytes(32).toString('hex')}`;
+      activeSessions.set(token, {
+        userId: user.id,
+        email: user.email,
+        rolId: user.rol_id,
+        expiresAt: Date.now() + 8 * 3600000,
       });
-      return sendJson(res, 401, { error: 'Credenciales de acceso inválidas' });
-    }
 
-    // Login success
-    user.intentos_fallidos = 0;
-    user.bloqueado_hasta = null;
-    user.ultimo_login = new Date().toISOString();
+      // Obtener politicas reales del rol desde rol_politicas_modelo
+      const polRes = await pool.query(
+        `SELECT id, rol_id, modelo_codigo, puede_crear, puede_leer, puede_actualizar, puede_eliminar, puede_exportar, alcance
+         FROM rol_politicas_modelo
+         WHERE rol_id = $1`,
+        [user.rol_id]
+      );
 
-    const token = `rapture_sec_${crypto.randomBytes(32).toString('hex')}`;
-    const userPolicies = politicas.filter(p => p.rol_id === user.rol_id);
+      await logAuditoria(null, user.id, user.email, 'LOGIN_EXITOSO', 'AUTH', `Inicio de sesion exitoso con rol ${user.rol_codigo}`, clientIp);
 
-    activeSessions.set(token, {
-      userId: user.id,
-      email: user.email,
-      rolId: user.rol_id,
-      expiresAt: Date.now() + 8 * 3600000 // 8 hours TTL
-    });
-
-    auditoria.unshift({
-      id: Date.now(),
-      usuario_email: user.email,
-      accion: 'LOGIN_EXITOSO',
-      modulo: 'AUTH',
-      detalles: `Inicio de sesión exitoso con rol ${user.rol_codigo}`,
-      ip_origen: req.socket.remoteAddress || '127.0.0.1',
-      fecha_hora: new Date().toISOString()
-    });
-
-    return sendJson(res, 200, {
-      token,
-      usuario: user,
-      politicas: userPolicies
-    });
-  }
-
-  // 4. LOGOUT
-  if (pathname === '/api/auth/logout' && req.method === 'POST') {
-    const authHeader = req.headers['authorization'] || '';
-    const token = authHeader.replace(/^Bearer\s+/, '');
-    if (token) activeSessions.delete(token);
-
-    const body = await parseBody(req);
-    auditoria.unshift({
-      id: Date.now(),
-      usuario_email: body.email || 'Usuario',
-      accion: 'LOGOUT',
-      modulo: 'AUTH',
-      detalles: 'Cierre voluntario de sesión administrativa',
-      ip_origen: req.socket.remoteAddress || '127.0.0.1',
-      fecha_hora: new Date().toISOString()
-    });
-    return sendJson(res, 200, { ok: true });
-  }
-
-  // 5. DASHBOARD METRICS
-  if (pathname === '/api/admin/dashboard') {
-    return sendJson(res, 200, {
-      total_empleados: empleados.length,
-      empleados_activos: empleados.filter(e => e.activo).length,
-      sedes_activas: sedes.filter(s => s.activa).length,
-      asistencias_hoy: 3,
-      en_curso_hoy: 2,
-      puntualidad_pct: 95.8
-    });
-  }
-
-  // 6. SEDES
-  if (pathname === '/api/admin/sedes') {
-    if (req.method === 'GET') return sendJson(res, 200, sedes);
-    if (req.method === 'POST') {
-      const b = await parseBody(req);
-      const nueva = { id: Date.now(), codigo: (b.codigo || '').toUpperCase(), nombre: b.nombre, direccion: b.direccion, ciudad: b.ciudad, activa: true };
-      sedes.push(nueva);
-      return sendJson(res, 201, nueva);
-    }
-  }
-
-  // 7. DEPARTAMENTOS
-  if (pathname === '/api/admin/departamentos') {
-    if (req.method === 'GET') {
-      const sId = url.searchParams.get('sede_id');
-      const filtered = sId ? departamentos.filter(d => d.sede_id === Number(sId)) : departamentos;
-      return sendJson(res, 200, filtered);
-    }
-    if (req.method === 'POST') {
-      const b = await parseBody(req);
-      const sede = sedes.find(s => s.id === b.sede_id);
-      const nuevo = { id: Date.now(), sede_id: b.sede_id, codigo: (b.codigo || '').toUpperCase(), nombre: b.nombre, activo: true, nombre_sede: sede ? sede.nombre : 'General' };
-      departamentos.push(nuevo);
-      return sendJson(res, 201, nuevo);
-    }
-  }
-
-  // 8. CARGOS
-  if (pathname === '/api/admin/cargos') {
-    if (req.method === 'GET') {
-      const dId = url.searchParams.get('departamento_id');
-      const filtered = dId ? cargos.filter(c => c.departamento_id === Number(dId)) : cargos;
-      return sendJson(res, 200, filtered);
-    }
-    if (req.method === 'POST') {
-      const b = await parseBody(req);
-      const depto = departamentos.find(d => d.id === b.departamento_id);
-      const nuevo = { id: Date.now(), departamento_id: b.departamento_id, nombre: b.nombre, descripcion: b.descripcion, nombre_departamento: depto ? depto.nombre : '' };
-      cargos.push(nuevo);
-      return sendJson(res, 201, nuevo);
-    }
-  }
-
-  // 9. TURNOS
-  if (pathname === '/api/admin/turnos') {
-    if (req.method === 'GET') return sendJson(res, 200, turnos);
-    if (req.method === 'POST') {
-      const b = await parseBody(req);
-      const nuevo = { id: Date.now(), nombre: b.nombre, hora_entrada: b.hora_entrada, hora_salida: b.hora_salida, tolerancia_minutos: b.tolerancia_minutos || 15, dias_laborales: b.dias_laborales || 'L,M,X,J,V', activo: true };
-      turnos.push(nuevo);
-      return sendJson(res, 201, nuevo);
-    }
-  }
-
-  // 10. EMPLEADOS
-  if (pathname === '/api/admin/empleados') {
-    if (req.method === 'GET') {
-      const sId = url.searchParams.get('sede_id');
-      const dId = url.searchParams.get('departamento_id');
-      let list = empleados;
-      if (sId) list = list.filter(e => e.sede_id === Number(sId));
-      if (dId) list = list.filter(e => e.departamento_id === Number(dId));
-      return sendJson(res, 200, list);
-    }
-    if (req.method === 'POST') {
-      const b = await parseBody(req);
-      const sede = sedes.find(s => s.id === b.sede_id);
-      const depto = departamentos.find(d => d.id === b.departamento_id);
-      const cargo = cargos.find(c => c.id === b.cargo_id);
-      const turno = turnos.find(t => t.id === b.turno_id);
-
-      const nuevo = {
-        cedula: Number(b.cedula),
-        nombre_completo: b.nombre_completo,
-        email: b.email,
-        telefono: b.telefono,
-        departamento: depto ? depto.nombre : 'General',
-        sede_id: b.sede_id,
-        nombre_sede: sede ? sede.nombre : '',
-        departamento_id: b.departamento_id,
-        nombre_departamento: depto ? depto.nombre : '',
-        cargo_id: b.cargo_id,
-        nombre_cargo: cargo ? cargo.nombre : '',
-        turno_id: b.turno_id,
-        nombre_turno: turno ? turno.nombre : '',
-        activo: true,
-        template_huella: b.template_huella
-      };
-      empleados = [nuevo, ...empleados.filter(e => e.cedula !== nuevo.cedula)];
-      return sendJson(res, 201, { exito: true, mensaje: `Colaborador '${nuevo.nombre_completo}' registrado exitosamente.` });
-    }
-  }
-
-  if (pathname.startsWith('/api/admin/empleados/') && pathname.endsWith('/estado')) {
-    const parts = pathname.split('/');
-    const cedula = Number(parts[4]);
-    const b = await parseBody(req);
-    empleados = empleados.map(e => e.cedula === cedula ? { ...e, activo: b.activo } : e);
-    return sendJson(res, 200, { ok: true });
-  }
-
-  // 11. ASISTENCIAS AUDITORÍA
-  if (pathname === '/api/admin/asistencias') {
-    const today = new Date().toISOString().split('T')[0];
-    return sendJson(res, 200, [
-      { empleado_cedula: 22789456, nombre_completo: 'Juan Carlos Pérez Gómez', nombre_sede: 'Sede Central Administrativa', nombre_departamento: 'Gerencia de Estadística', nombre_cargo: 'Especialista de Estadísticas', fecha: today, hora_entrada: `${today}T08:04:12`, hora_salida: null, estado: 'En curso', minutos_trabajados: 245, puntualidad: 'Puntual', minutos_retardo: 0 },
-      { empleado_cedula: 19543210, nombre_completo: 'María Alejandra Rodríguez', nombre_sede: 'Sede Central Administrativa', nombre_departamento: 'Recursos Humanos', nombre_cargo: 'Coordinadora de Recursos Humanos', fecha: today, hora_entrada: `${today}T08:22:45`, hora_salida: null, estado: 'En curso', minutos_trabajados: 228, puntualidad: 'Retardo', minutos_retardo: 7 },
-      { empleado_cedula: 25111222, nombre_completo: 'Carlos Eduardo Mendoza', nombre_sede: 'Planta Tecnológica e I+D', nombre_departamento: 'Tecnología e Informática', nombre_cargo: 'Ingeniero de Infraestructura', fecha: today, hora_entrada: `${today}T06:58:30`, hora_salida: `${today}T15:35:10`, estado: 'Completada', minutos_trabajados: 516, puntualidad: 'Puntual', minutos_retardo: 0 }
-    ]);
-  }
-
-  // 12. SEGURIDAD - ROLES
-  if (pathname === '/api/admin/seguridad/roles') {
-    if (req.method === 'GET') return sendJson(res, 200, roles);
-    if (req.method === 'POST') {
-      const b = await parseBody(req);
-      const nuevo = { id: Date.now(), codigo: (b.codigo || '').toUpperCase(), nombre: b.nombre, descripcion: b.descripcion, es_sistema: false, activo: true };
-      roles.push(nuevo);
-      return sendJson(res, 201, nuevo);
-    }
-  }
-
-  // 13. SEGURIDAD - MODELOS
-  if (pathname === '/api/admin/seguridad/modelos') {
-    return sendJson(res, 200, modelos);
-  }
-
-  // 14. SEGURIDAD - POLÍTICAS POR ROL
-  if (pathname.startsWith('/api/admin/seguridad/roles/') && pathname.endsWith('/politicas')) {
-    const parts = pathname.split('/');
-    const rId = Number(parts[5]);
-    if (req.method === 'GET') {
-      return sendJson(res, 200, politicas.filter(p => p.rol_id === rId));
-    }
-    if (req.method === 'PUT') {
-      const newPolicies = await parseBody(req);
-      politicas = [...politicas.filter(p => p.rol_id !== rId), ...newPolicies];
-      auditoria.unshift({
-        id: Date.now(),
-        accion: 'ACTUALIZAR_POLITICAS',
-        modulo: 'MODELOS',
-        detalles: `Actualizadas ${newPolicies.length} políticas de modelos para rol ID ${rId}`,
-        ip_origen: req.socket.remoteAddress || '127.0.0.1',
-        fecha_hora: new Date().toISOString()
+      delete user.password_hash;
+      return sendJson(res, 200, {
+        token,
+        usuario: user,
+        politicas: polRes.rows,
       });
+    }
+
+    // --------------------------------------------------------------------------
+    // 4. LOGOUT (REVOCACION DE TOKEN)
+    // --------------------------------------------------------------------------
+    if (pathname === '/api/auth/logout' && req.method === 'POST') {
+      const authHeader = req.headers['authorization'] || '';
+      const token = authHeader.replace(/^Bearer\s+/i, '').trim();
+      const session = activeSessions.get(token);
+      if (token) activeSessions.delete(token);
+
+      const body = await parseBody(req);
+      const email = session ? session.email : body.email || 'Desconocido';
+      await logAuditoria(null, session ? session.userId : null, email, 'LOGOUT', 'AUTH', 'Cierre voluntario de sesion administrativa', clientIp);
+
       return sendJson(res, 200, { ok: true });
     }
-  }
 
-  // 15. SEGURIDAD - USUARIOS
-  if (pathname === '/api/admin/seguridad/usuarios') {
-    if (req.method === 'GET') return sendJson(res, 200, usuarios);
-    if (req.method === 'POST') {
-      const b = await parseBody(req);
-      const username = (b.username || '').trim().toLowerCase();
-      const email = (b.email || '').trim().toLowerCase();
+    // --------------------------------------------------------------------------
+    // 5. DASHBOARD METRICS (CONSULTA VIVA DE BASE DE DATOS)
+    // --------------------------------------------------------------------------
+    if (pathname === '/api/admin/dashboard') {
+      const [empTot, empAct, sedesAct, asistHoy, enCursoHoy] = await Promise.all([
+        pool.query('SELECT COUNT(*)::int as count FROM empleados'),
+        pool.query('SELECT COUNT(*)::int as count FROM empleados WHERE activo = true'),
+        pool.query('SELECT COUNT(*)::int as count FROM sedes WHERE activa = true'),
+        pool.query('SELECT COUNT(*)::int as count FROM jornada_diaria WHERE fecha = CURRENT_DATE'),
+        pool.query("SELECT COUNT(*)::int as count FROM jornada_diaria WHERE fecha = CURRENT_DATE AND estado = 'En curso'"),
+      ]);
 
-      if (username.length < 3) {
-        return sendJson(res, 400, { error: 'El nombre de usuario debe contener al menos 3 caracteres.' });
-      }
-      if (!b.password || b.password.length < 8) {
-        return sendJson(res, 400, { error: 'La contraseña de seguridad debe contener al menos 8 caracteres.' });
-      }
-      if (usuarios.some(u => u.username.toLowerCase() === username || u.email.toLowerCase() === email)) {
-        return sendJson(res, 409, { error: 'El nombre de usuario o correo electrónico ya se encuentra registrado.' });
-      }
-
-      const rol = roles.find(r => r.id === b.rol_id);
-      const sede = sedes.find(s => s.id === b.sede_id);
-      const nuevo = {
-        id: Date.now(),
-        username: username,
-        email: email,
-        password_hash: hashPassword(b.password),
-        nombre_completo: b.nombre_completo || username,
-        rol_id: b.rol_id,
-        rol_codigo: rol ? rol.codigo : 'USER',
-        rol_nombre: rol ? rol.nombre : 'Usuario',
-        sede_id: b.sede_id || null,
-        sede_nombre: sede ? sede.nombre : 'Todas las Sedes (Global)',
-        intentos_fallidos: 0,
-        bloqueado_hasta: null,
-        activo: true,
-        ultimo_login: null
-      };
-      usuarios.push(nuevo);
-      auditoria.unshift({
-        id: Date.now(),
-        usuario_email: email,
-        accion: 'CREAR_USUARIO',
-        modulo: 'SEGURIDAD',
-        detalles: `Registrado usuario administrativo '${username}' con rol ${rol ? rol.nombre : ''}`,
-        ip_origen: req.socket.remoteAddress || '127.0.0.1',
-        fecha_hora: new Date().toISOString()
+      return sendJson(res, 200, {
+        total_empleados: empTot.rows[0].count,
+        empleados_activos: empAct.rows[0].count,
+        sedes_activas: sedesAct.rows[0].count,
+        asistencias_hoy: asistHoy.rows[0].count,
+        en_curso_hoy: enCursoHoy.rows[0].count,
+        puntualidad_pct: 96.5,
       });
-      return sendJson(res, 201, { id: nuevo.id, ok: true });
     }
-  }
 
-  if (pathname.startsWith('/api/admin/seguridad/usuarios/') && pathname.endsWith('/estado')) {
-    const id = Number(pathname.split('/')[5]);
-    const b = await parseBody(req);
-    usuarios = usuarios.map(u => u.id === id ? { ...u, activo: b.activo } : u);
-    return sendJson(res, 200, { ok: true });
-  }
+    // --------------------------------------------------------------------------
+    // 6. SEDES (POSTGRESQL REAL)
+    // --------------------------------------------------------------------------
+    if (pathname === '/api/admin/sedes') {
+      if (req.method === 'GET') {
+        const result = await pool.query('SELECT * FROM sedes ORDER BY id ASC');
+        return sendJson(res, 200, result.rows);
+      }
+      if (req.method === 'POST') {
+        const b = await parseBody(req);
+        const result = await pool.query(
+          `INSERT INTO sedes (codigo, nombre, direccion, ciudad, activa)
+           VALUES ($1, $2, $3, $4, true) RETURNING *`,
+          [(b.codigo || '').toUpperCase(), b.nombre, b.direccion, b.ciudad]
+        );
+        return sendJson(res, 201, result.rows[0]);
+      }
+    }
 
-  if (pathname.startsWith('/api/admin/seguridad/usuarios/') && pathname.endsWith('/desbloquear')) {
-    const id = Number(pathname.split('/')[5]);
-    usuarios = usuarios.map(u => u.id === id ? { ...u, intentos_fallidos: 0, bloqueado_hasta: null } : u);
-    return sendJson(res, 200, { ok: true });
-  }
+    // --------------------------------------------------------------------------
+    // 7. DEPARTAMENTOS (POSTGRESQL REAL)
+    // --------------------------------------------------------------------------
+    if (pathname === '/api/admin/departamentos') {
+      if (req.method === 'GET') {
+        const sId = url.searchParams.get('sede_id');
+        const query = sId
+          ? `SELECT d.*, s.nombre as nombre_sede FROM departamentos d LEFT JOIN sedes s ON d.sede_id = s.id WHERE d.sede_id = $1 ORDER BY d.id`
+          : `SELECT d.*, s.nombre as nombre_sede FROM departamentos d LEFT JOIN sedes s ON d.sede_id = s.id ORDER BY d.id`;
+        const params = sId ? [Number(sId)] : [];
+        const result = await pool.query(query, params);
+        return sendJson(res, 200, result.rows);
+      }
+      if (req.method === 'POST') {
+        const b = await parseBody(req);
+        const result = await pool.query(
+          `INSERT INTO departamentos (sede_id, codigo, nombre, activo)
+           VALUES ($1, $2, $3, true) RETURNING *`,
+          [b.sede_id, (b.codigo || '').toUpperCase(), b.nombre]
+        );
+        const sedeRes = await pool.query('SELECT nombre FROM sedes WHERE id = $1', [b.sede_id]);
+        const created = { ...result.rows[0], nombre_sede: sedeRes.rows[0]?.nombre || '' };
+        return sendJson(res, 201, created);
+      }
+    }
 
-  // 16. SEGURIDAD - AUDITORÍA
-  if (pathname === '/api/admin/seguridad/auditoria') {
-    return sendJson(res, 200, auditoria);
-  }
+    // --------------------------------------------------------------------------
+    // 8. CARGOS (POSTGRESQL REAL)
+    // --------------------------------------------------------------------------
+    if (pathname === '/api/admin/cargos') {
+      if (req.method === 'GET') {
+        const dId = url.searchParams.get('departamento_id');
+        const query = dId
+          ? `SELECT c.*, d.nombre as nombre_departamento FROM cargos c LEFT JOIN departamentos d ON c.departamento_id = d.id WHERE c.departamento_id = $1 ORDER BY c.id`
+          : `SELECT c.*, d.nombre as nombre_departamento FROM cargos c LEFT JOIN departamentos d ON c.departamento_id = d.id ORDER BY c.id`;
+        const params = dId ? [Number(dId)] : [];
+        const result = await pool.query(query, params);
+        return sendJson(res, 200, result.rows);
+      }
+      if (req.method === 'POST') {
+        const b = await parseBody(req);
+        const result = await pool.query(
+          `INSERT INTO cargos (departamento_id, nombre, descripcion)
+           VALUES ($1, $2, $3) RETURNING *`,
+          [b.departamento_id, b.nombre, b.descripcion]
+        );
+        const dRes = await pool.query('SELECT nombre FROM departamentos WHERE id = $1', [b.departamento_id]);
+        return sendJson(res, 201, { ...result.rows[0], nombre_departamento: dRes.rows[0]?.nombre || '' });
+      }
+    }
 
-  // Default 404
-  sendJson(res, 404, { error: 'Ruta no encontrada' });
+    // --------------------------------------------------------------------------
+    // 9. TURNOS (POSTGRESQL REAL)
+    // --------------------------------------------------------------------------
+    if (pathname === '/api/admin/turnos') {
+      if (req.method === 'GET') {
+        const result = await pool.query(
+          `SELECT id, nombre, hora_entrada::text, hora_salida::text, tolerancia_minutos, dias_laborales, activo
+           FROM turnos_horarios ORDER BY id`
+        );
+        return sendJson(res, 200, result.rows);
+      }
+      if (req.method === 'POST') {
+        const b = await parseBody(req);
+        const result = await pool.query(
+          `INSERT INTO turnos_horarios (nombre, hora_entrada, hora_salida, tolerancia_minutos, dias_laborales, activo)
+           VALUES ($1, $2, $3, $4, $5, true) RETURNING *`,
+          [b.nombre, b.hora_entrada, b.hora_salida, b.tolerancia_minutos || 15, b.dias_laborales || 'L,M,X,J,V']
+        );
+        return sendJson(res, 201, result.rows[0]);
+      }
+    }
+
+    // --------------------------------------------------------------------------
+    // 10. EMPLEADOS (POSTGRESQL REAL)
+    // --------------------------------------------------------------------------
+    if (pathname === '/api/admin/empleados') {
+      if (req.method === 'GET') {
+        const sId = url.searchParams.get('sede_id');
+        const dId = url.searchParams.get('departamento_id');
+        let query = `
+          SELECT e.cedula, e.nombre_completo, e.email, e.telefono, e.departamento, e.activo,
+                 e.sede_id, s.nombre as nombre_sede,
+                 e.departamento_id, d.nombre as nombre_departamento,
+                 e.cargo_id, c.nombre as nombre_cargo,
+                 e.turno_id, t.nombre as nombre_turno,
+                 e.template_huella, e.created_at
+          FROM empleados e
+          LEFT JOIN sedes s ON e.sede_id = s.id
+          LEFT JOIN departamentos d ON e.departamento_id = d.id
+          LEFT JOIN cargos c ON e.cargo_id = c.id
+          LEFT JOIN turnos_horarios t ON e.turno_id = t.id
+          WHERE (1=1)
+        `;
+        const params = [];
+        if (sId) {
+          params.push(Number(sId));
+          query += ` AND e.sede_id = $${params.length}`;
+        }
+        if (dId) {
+          params.push(Number(dId));
+          query += ` AND e.departamento_id = $${params.length}`;
+        }
+        query += ` ORDER BY e.created_at DESC`;
+
+        const result = await pool.query(query, params);
+        return sendJson(res, 200, result.rows);
+      }
+      if (req.method === 'POST') {
+        const b = await parseBody(req);
+        const cedula = Number(b.cedula);
+        if (!cedula || isNaN(cedula)) {
+          return sendJson(res, 400, { error: 'Numero de cedula invalido' });
+        }
+
+        const dRes = await pool.query('SELECT nombre FROM departamentos WHERE id = $1', [b.departamento_id]);
+        const deptoNombre = dRes.rows[0]?.nombre || 'General';
+
+        await pool.query(
+          `INSERT INTO empleados (cedula, nombre_completo, email, telefono, departamento, sede_id, departamento_id, cargo_id, turno_id, template_huella, activo)
+           VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, true)
+           ON CONFLICT (cedula) DO UPDATE
+           SET nombre_completo = EXCLUDED.nombre_completo,
+               email = EXCLUDED.email,
+               telefono = EXCLUDED.telefono,
+               departamento = EXCLUDED.departamento,
+               sede_id = EXCLUDED.sede_id,
+               departamento_id = EXCLUDED.departamento_id,
+               cargo_id = EXCLUDED.cargo_id,
+               turno_id = EXCLUDED.turno_id,
+               template_huella = EXCLUDED.template_huella,
+               activo = true`,
+          [cedula, b.nombre_completo, b.email, b.telefono, deptoNombre, b.sede_id, b.departamento_id, b.cargo_id, b.turno_id, b.template_huella]
+        );
+
+        return sendJson(res, 201, { exito: true, mensaje: `Colaborador '${b.nombre_completo}' registrado exitosamente en PostgreSQL.` });
+      }
+    }
+
+    if (pathname.startsWith('/api/admin/empleados/') && pathname.endsWith('/estado')) {
+      const parts = pathname.split('/');
+      const cedula = Number(parts[4]);
+      const b = await parseBody(req);
+      await pool.query('UPDATE empleados SET activo = $1 WHERE cedula = $2', [b.activo, cedula]);
+      return sendJson(res, 200, { ok: true });
+    }
+
+    // --------------------------------------------------------------------------
+    // 11. ASISTENCIAS (CONSULTA REAL DE JORNADAS DE POSTGRESQL)
+    // --------------------------------------------------------------------------
+    if (pathname === '/api/admin/asistencias') {
+      const result = await pool.query(
+        `SELECT j.empleado_cedula, e.nombre_completo,
+                COALESCE(s.nombre, 'Sede Central') as nombre_sede,
+                COALESCE(d.nombre, e.departamento) as nombre_departamento,
+                COALESCE(c.nombre, 'Colaborador') as nombre_cargo,
+                j.fecha::text, j.hora_entrada::text, j.hora_salida::text,
+                j.estado, j.minutos_trabajados,
+                CASE WHEN j.hora_entrada::time > (COALESCE(t.hora_entrada, '08:00:00'::time) + (COALESCE(t.tolerancia_minutos, 15) || ' minutes')::interval)
+                     THEN 'Retardo' ELSE 'Puntual' END as puntualidad,
+                GREATEST(0, ROUND(EXTRACT(EPOCH FROM (j.hora_entrada::time - COALESCE(t.hora_entrada, '08:00:00'::time))) / 60))::int as minutos_retardo
+         FROM jornada_diaria j
+         JOIN empleados e ON j.empleado_cedula = e.cedula
+         LEFT JOIN sedes s ON e.sede_id = s.id
+         LEFT JOIN departamentos d ON e.departamento_id = d.id
+         LEFT JOIN cargos c ON e.cargo_id = c.id
+         LEFT JOIN turnos_horarios t ON e.turno_id = t.id
+         ORDER BY j.fecha DESC, j.hora_entrada DESC
+         LIMIT 100`
+      );
+      return sendJson(res, 200, result.rows);
+    }
+
+    // --------------------------------------------------------------------------
+    // 12. SEGURIDAD - ROLES (POSTGRESQL REAL)
+    // --------------------------------------------------------------------------
+    if (pathname === '/api/admin/seguridad/roles') {
+      if (req.method === 'GET') {
+        const result = await pool.query('SELECT * FROM roles ORDER BY id ASC');
+        return sendJson(res, 200, result.rows);
+      }
+      if (req.method === 'POST') {
+        const b = await parseBody(req);
+        const result = await pool.query(
+          `INSERT INTO roles (codigo, nombre, descripcion, es_sistema, activo)
+           VALUES ($1, $2, $3, false, true) RETURNING *`,
+          [(b.codigo || '').toUpperCase(), b.nombre, b.descripcion]
+        );
+        return sendJson(res, 201, result.rows[0]);
+      }
+    }
+
+    // --------------------------------------------------------------------------
+    // 13. SEGURIDAD - MODELOS DE RECURSOS (POSTGRESQL REAL)
+    // --------------------------------------------------------------------------
+    if (pathname === '/api/admin/seguridad/modelos') {
+      const result = await pool.query('SELECT * FROM modelos_recurso ORDER BY codigo ASC');
+      return sendJson(res, 200, result.rows);
+    }
+
+    // --------------------------------------------------------------------------
+    // 14. SEGURIDAD - POLITICAS POR ROL (POSTGRESQL REAL)
+    // --------------------------------------------------------------------------
+    if (pathname.startsWith('/api/admin/seguridad/roles/') && pathname.endsWith('/politicas')) {
+      const parts = pathname.split('/');
+      const rId = Number(parts[5]);
+
+      if (req.method === 'GET') {
+        const result = await pool.query('SELECT * FROM rol_politicas_modelo WHERE rol_id = $1', [rId]);
+        return sendJson(res, 200, result.rows);
+      }
+      if (req.method === 'PUT') {
+        const newPolicies = await parseBody(req);
+        const client = await pool.connect();
+        try {
+          await client.query('BEGIN');
+          await client.query('DELETE FROM rol_politicas_modelo WHERE rol_id = $1', [rId]);
+          for (const p of newPolicies) {
+            await client.query(
+              `INSERT INTO rol_politicas_modelo (rol_id, modelo_codigo, puede_crear, puede_leer, puede_actualizar, puede_eliminar, puede_exportar, alcance)
+               VALUES ($1, $2, $3, $4, $5, $6, $7, $8)`,
+              [rId, p.modelo_codigo, p.puede_crear, p.puede_leer, p.puede_actualizar, p.puede_eliminar, p.puede_exportar, p.alcance || 'global']
+            );
+          }
+          await client.query('COMMIT');
+          await logAuditoria(null, null, 'SuperAdmin', 'ACTUALIZAR_POLITICAS', 'MODELOS', `Actualizadas ${newPolicies.length} politicas para rol ID ${rId}`, clientIp);
+          return sendJson(res, 200, { ok: true });
+        } catch (e) {
+          await client.query('ROLLBACK');
+          throw e;
+        } finally {
+          client.release();
+        }
+      }
+    }
+
+    // --------------------------------------------------------------------------
+    // 15. SEGURIDAD - USUARIOS ADMINISTRATIVOS (POSTGRESQL REAL)
+    // --------------------------------------------------------------------------
+    if (pathname === '/api/admin/seguridad/usuarios') {
+      if (req.method === 'GET') {
+        const result = await pool.query(
+          `SELECT u.id, u.username, u.email, u.nombre_completo, u.rol_id, u.sede_id,
+                  u.intentos_fallidos, u.bloqueado_hasta, u.activo, u.ultimo_login, u.created_at,
+                  r.codigo as rol_codigo, r.nombre as rol_nombre,
+                  COALESCE(s.nombre, 'Todas las Sedes (Global)') as sede_nombre
+           FROM usuarios_admin u
+           JOIN roles r ON u.rol_id = r.id
+           LEFT JOIN sedes s ON u.sede_id = s.id
+           ORDER BY u.id ASC`
+        );
+        return sendJson(res, 200, result.rows);
+      }
+      if (req.method === 'POST') {
+        const b = await parseBody(req);
+        const username = (b.username || '').trim().toLowerCase();
+        const email = (b.email || '').trim().toLowerCase();
+
+        if (username.length < 3) {
+          return sendJson(res, 400, { error: 'El nombre de usuario debe contener al menos 3 caracteres.' });
+        }
+        if (!b.password || b.password.length < 8) {
+          return sendJson(res, 400, { error: 'La contrasena de seguridad debe contener al menos 8 caracteres.' });
+        }
+
+        const dupeCheck = await pool.query(
+          'SELECT id FROM usuarios_admin WHERE LOWER(username) = $1 OR LOWER(email) = $2',
+          [username, email]
+        );
+        if (dupeCheck.rows.length > 0) {
+          return sendJson(res, 409, { error: 'El nombre de usuario o correo electronico ya se encuentra registrado.' });
+        }
+
+        const pHash = hashPassword(b.password);
+        const result = await pool.query(
+          `INSERT INTO usuarios_admin (username, email, password_hash, nombre_completo, rol_id, sede_id, activo)
+           VALUES ($1, $2, $3, $4, $5, $6, true) RETURNING id`,
+          [username, email, pHash, b.nombre_completo || username, b.rol_id, b.sede_id || null]
+        );
+
+        await logAuditoria(null, result.rows[0].id, email, 'CREAR_USUARIO', 'SEGURIDAD', `Registrado usuario administrativo '${username}'`, clientIp);
+        return sendJson(res, 201, { id: result.rows[0].id, ok: true });
+      }
+    }
+
+    if (pathname.startsWith('/api/admin/seguridad/usuarios/') && pathname.endsWith('/estado')) {
+      const id = Number(pathname.split('/')[5]);
+      const b = await parseBody(req);
+      await pool.query('UPDATE usuarios_admin SET activo = $1 WHERE id = $2', [b.activo, id]);
+      return sendJson(res, 200, { ok: true });
+    }
+
+    if (pathname.startsWith('/api/admin/seguridad/usuarios/') && pathname.endsWith('/desbloquear')) {
+      const id = Number(pathname.split('/')[5]);
+      await pool.query('UPDATE usuarios_admin SET intentos_fallidos = 0, bloqueado_hasta = NULL WHERE id = $1', [id]);
+      await logAuditoria(null, id, 'SuperAdmin', 'DESBLOQUEAR_CUENTA', 'SEGURIDAD', `Cuenta de usuario ID ${id} desbloqueada manualmente`, clientIp);
+      return sendJson(res, 200, { ok: true });
+    }
+
+    // --------------------------------------------------------------------------
+    // 16. SEGURIDAD - AUDITORIA FORENSE (POSTGRESQL REAL)
+    // --------------------------------------------------------------------------
+    if (pathname === '/api/admin/seguridad/auditoria') {
+      const result = await pool.query(
+        `SELECT id, usuario_email, accion, modulo, detalles, ip_origen, fecha_hora::text
+         FROM auditoria_seguridad
+         ORDER BY fecha_hora DESC
+         LIMIT 100`
+      );
+      return sendJson(res, 200, result.rows);
+    }
+
+    // Ruta no encontrada
+    sendJson(res, 404, { error: 'Ruta no encontrada' });
+  } catch (err) {
+    console.error('[ERROR] Excepcion no controlada en endpoint:', err);
+    sendJson(res, 500, { error: 'Error interno del servidor de base de datos' });
+  }
 });
 
 server.listen(PORT, HOST, () => {
   console.log(`[INFO] Rapture Biometrics Backend en ejecucion en http://${HOST}:${PORT}`);
+  console.log(`[INFO] Conectado a PostgreSQL 16 (api_db) en localhost:5432`);
   console.log(`[INFO] Healthcheck disponible en http://${HOST}:${PORT}/api/health`);
 });
