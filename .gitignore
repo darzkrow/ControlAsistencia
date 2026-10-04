@@ -10,6 +10,8 @@ frontend/node_modules/
 **/node_modules/
 frontend/dist/
 dist/
+mobile/.expo/
+mobile/dist/
 npm-debug.log*
 yarn-debug.log*
 yarn-error.log*
