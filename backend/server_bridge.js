@@ -1,10 +1,34 @@
+const fs = require('node:fs');
+const path = require('node:path');
 const http = require('node:http');
 const crypto = require('node:crypto');
 const { Pool } = require('pg');
 const Redis = require('ioredis');
 
-const PORT = 3000;
-const HOST = '127.0.0.1';
+// Carga automatica de variables de entorno desde .env si existe en el root
+const envPath = path.resolve(__dirname, '../.env');
+if (fs.existsSync(envPath)) {
+  const envContent = fs.readFileSync(envPath, 'utf8');
+  for (const line of envContent.split(/\r?\n/)) {
+    const trimmed = line.trim();
+    if (!trimmed || trimmed.startsWith('#')) continue;
+    const eqIdx = trimmed.indexOf('=');
+    if (eqIdx !== -1) {
+      const key = trimmed.slice(0, eqIdx).trim();
+      let val = trimmed.slice(eqIdx + 1).trim();
+      if ((val.startsWith('"') && val.endsWith('"')) || (val.startsWith("'") && val.endsWith("'"))) {
+        val = val.slice(1, -1);
+      }
+      if (!process.env[key]) {
+        process.env[key] = val;
+      }
+    }
+  }
+}
+
+const PORT = Number(process.env.SERVER_PORT) || 3000;
+const HOST = process.env.SERVER_HOST || '127.0.0.1';
+const API_PREFIX = (process.env.API_PREFIX || '/api/v1').replace(/\/+$/, '');
 
 // Conexion al Pool de PostgreSQL (rapture-db)
 const pool = new Pool({
@@ -251,14 +275,25 @@ const server = http.createServer(async (req, res) => {
   }
 
   const url = new URL(req.url, `http://${req.headers.host}`);
-  const pathname = url.pathname;
+  const rawPath = url.pathname;
   const clientIp = req.socket.remoteAddress || '127.0.0.1';
+
+  // Normalizacion agnostica del prefijo de API (soporta API_PREFIX dinamico ej: /api/v1 o /api/v2, y compatibilidad con /api legado)
+  let route = rawPath;
+  if (route.startsWith(API_PREFIX)) {
+    route = route.slice(API_PREFIX.length);
+  } else if (route.startsWith('/api')) {
+    route = route.slice(4);
+  }
+  if (!route.startsWith('/')) {
+    route = '/' + route;
+  }
 
   try {
     // --------------------------------------------------------------------------
     // 1. HEALTHCHECK ENDPOINT
     // --------------------------------------------------------------------------
-    if (pathname === '/api/health') {
+    if (route === '/health') {
       const dbCheck = await pool.query('SELECT NOW() as now');
       return sendJson(res, 200, {
         status: 'ok',
@@ -281,7 +316,7 @@ const server = http.createServer(async (req, res) => {
     // --------------------------------------------------------------------------
     // 2. KIOSKO BIOMETRICO - REGISTRO ASINCRONO POR LOTES (SUB-MILISEGUNDO)
     // --------------------------------------------------------------------------
-    if (pathname === '/api/escaneo' && req.method === 'POST') {
+    if (route === '/escaneo' && req.method === 'POST') {
       const body = await parseBody(req);
       const idNum = Number(body.cedula);
 
@@ -388,7 +423,7 @@ const server = http.createServer(async (req, res) => {
     // --------------------------------------------------------------------------
     // 3. AUTENTICACION Y LOGIN (VERIFICACION CONTRA TABLA usuarios_admin)
     // --------------------------------------------------------------------------
-    if (pathname === '/api/auth/login' && req.method === 'POST') {
+    if (route === '/auth/login' && req.method === 'POST') {
       const { identifier, password } = await parseBody(req);
       if (!identifier || !password) {
         return sendJson(res, 400, { error: 'Identificador y contrasena requeridos' });
@@ -497,7 +532,7 @@ const server = http.createServer(async (req, res) => {
     // --------------------------------------------------------------------------
     // 4. LOGOUT (REVOCACION DE TOKEN)
     // --------------------------------------------------------------------------
-    if (pathname === '/api/auth/logout' && req.method === 'POST') {
+    if (route === '/auth/logout' && req.method === 'POST') {
       const authHeader = req.headers['authorization'] || '';
       const token = authHeader.replace(/^Bearer\s+/i, '').trim();
       const session = activeSessions.get(token);
@@ -513,7 +548,7 @@ const server = http.createServer(async (req, res) => {
     // --------------------------------------------------------------------------
     // 5. DASHBOARD METRICS (CONSULTA VIVA DE BASE DE DATOS)
     // --------------------------------------------------------------------------
-    if (pathname === '/api/admin/dashboard') {
+    if (route === '/admin/dashboard') {
       const [empTot, empAct, sedesAct, asistHoy, enCursoHoy] = await Promise.all([
         pool.query('SELECT COUNT(*)::int as count FROM empleados'),
         pool.query('SELECT COUNT(*)::int as count FROM empleados WHERE activo = true'),
@@ -535,7 +570,7 @@ const server = http.createServer(async (req, res) => {
     // --------------------------------------------------------------------------
     // 6. SEDES (POSTGRESQL REAL)
     // --------------------------------------------------------------------------
-    if (pathname === '/api/admin/sedes') {
+    if (route === '/admin/sedes') {
       if (req.method === 'GET') {
         const result = await pool.query('SELECT * FROM sedes ORDER BY id ASC');
         return sendJson(res, 200, result.rows);
@@ -554,7 +589,7 @@ const server = http.createServer(async (req, res) => {
     // --------------------------------------------------------------------------
     // 7. DEPARTAMENTOS (POSTGRESQL REAL)
     // --------------------------------------------------------------------------
-    if (pathname === '/api/admin/departamentos') {
+    if (route === '/admin/departamentos') {
       if (req.method === 'GET') {
         const sId = url.searchParams.get('sede_id');
         const query = sId
@@ -580,7 +615,7 @@ const server = http.createServer(async (req, res) => {
     // --------------------------------------------------------------------------
     // 8. CARGOS (POSTGRESQL REAL)
     // --------------------------------------------------------------------------
-    if (pathname === '/api/admin/cargos') {
+    if (route === '/admin/cargos') {
       if (req.method === 'GET') {
         const dId = url.searchParams.get('departamento_id');
         const query = dId
@@ -605,7 +640,7 @@ const server = http.createServer(async (req, res) => {
     // --------------------------------------------------------------------------
     // 9. TURNOS (POSTGRESQL REAL)
     // --------------------------------------------------------------------------
-    if (pathname === '/api/admin/turnos') {
+    if (route === '/admin/turnos') {
       if (req.method === 'GET') {
         const result = await pool.query(
           `SELECT id, nombre, hora_entrada::text, hora_salida::text, tolerancia_minutos, dias_laborales, activo
@@ -627,7 +662,7 @@ const server = http.createServer(async (req, res) => {
     // --------------------------------------------------------------------------
     // 10. EMPLEADOS (POSTGRESQL REAL)
     // --------------------------------------------------------------------------
-    if (pathname === '/api/admin/empleados') {
+    if (route === '/admin/empleados') {
       if (req.method === 'GET') {
         const sId = url.searchParams.get('sede_id');
         const dId = url.searchParams.get('departamento_id');
@@ -691,9 +726,9 @@ const server = http.createServer(async (req, res) => {
       }
     }
 
-    if (pathname.startsWith('/api/admin/empleados/') && pathname.endsWith('/estado')) {
-      const parts = pathname.split('/');
-      const cedula = Number(parts[4]);
+    const matchEmpEstado = route.match(/^\/admin\/empleados\/(\d+)\/estado$/);
+    if (matchEmpEstado) {
+      const cedula = Number(matchEmpEstado[1]);
       const b = await parseBody(req);
       await pool.query('UPDATE empleados SET activo = $1 WHERE cedula = $2', [b.activo, cedula]);
       await invalidateEmployeeCache(cedula);
@@ -703,7 +738,7 @@ const server = http.createServer(async (req, res) => {
     // --------------------------------------------------------------------------
     // 11. ASISTENCIAS (CONSULTA REAL DE JORNADAS DE POSTGRESQL)
     // --------------------------------------------------------------------------
-    if (pathname === '/api/admin/asistencias') {
+    if (route === '/admin/asistencias') {
       const result = await pool.query(
         `SELECT j.empleado_cedula, e.nombre_completo,
                 COALESCE(s.nombre, 'Sede Central') as nombre_sede,
@@ -729,7 +764,7 @@ const server = http.createServer(async (req, res) => {
     // --------------------------------------------------------------------------
     // 12. SEGURIDAD - ROLES (POSTGRESQL REAL)
     // --------------------------------------------------------------------------
-    if (pathname === '/api/admin/seguridad/roles') {
+    if (route === '/admin/seguridad/roles') {
       if (req.method === 'GET') {
         const result = await pool.query('SELECT * FROM roles ORDER BY id ASC');
         return sendJson(res, 200, result.rows);
@@ -748,7 +783,7 @@ const server = http.createServer(async (req, res) => {
     // --------------------------------------------------------------------------
     // 13. SEGURIDAD - MODELOS DE RECURSOS (POSTGRESQL REAL)
     // --------------------------------------------------------------------------
-    if (pathname === '/api/admin/seguridad/modelos') {
+    if (route === '/admin/seguridad/modelos') {
       const result = await pool.query('SELECT * FROM modelos_recurso ORDER BY codigo ASC');
       return sendJson(res, 200, result.rows);
     }
@@ -756,9 +791,9 @@ const server = http.createServer(async (req, res) => {
     // --------------------------------------------------------------------------
     // 14. SEGURIDAD - POLITICAS POR ROL (POSTGRESQL REAL)
     // --------------------------------------------------------------------------
-    if (pathname.startsWith('/api/admin/seguridad/roles/') && pathname.endsWith('/politicas')) {
-      const parts = pathname.split('/');
-      const rId = Number(parts[5]);
+    const matchRolPol = route.match(/^\/admin\/seguridad\/roles\/(\d+)\/politicas$/);
+    if (matchRolPol) {
+      const rId = Number(matchRolPol[1]);
 
       if (req.method === 'GET') {
         const result = await pool.query('SELECT * FROM rol_politicas_modelo WHERE rol_id = $1', [rId]);
@@ -792,7 +827,7 @@ const server = http.createServer(async (req, res) => {
     // --------------------------------------------------------------------------
     // 15. SEGURIDAD - USUARIOS ADMINISTRATIVOS (POSTGRESQL REAL)
     // --------------------------------------------------------------------------
-    if (pathname === '/api/admin/seguridad/usuarios') {
+    if (route === '/admin/seguridad/usuarios') {
       if (req.method === 'GET') {
         const result = await pool.query(
           `SELECT u.id, u.username, u.email, u.nombre_completo, u.rol_id, u.sede_id,
@@ -838,15 +873,17 @@ const server = http.createServer(async (req, res) => {
       }
     }
 
-    if (pathname.startsWith('/api/admin/seguridad/usuarios/') && pathname.endsWith('/estado')) {
-      const id = Number(pathname.split('/')[5]);
+    const matchUsrEstado = route.match(/^\/admin\/seguridad\/usuarios\/(\d+)\/estado$/);
+    if (matchUsrEstado) {
+      const id = Number(matchUsrEstado[1]);
       const b = await parseBody(req);
       await pool.query('UPDATE usuarios_admin SET activo = $1 WHERE id = $2', [b.activo, id]);
       return sendJson(res, 200, { ok: true });
     }
 
-    if (pathname.startsWith('/api/admin/seguridad/usuarios/') && pathname.endsWith('/desbloquear')) {
-      const id = Number(pathname.split('/')[5]);
+    const matchUsrUnlock = route.match(/^\/admin\/seguridad\/usuarios\/(\d+)\/desbloquear$/);
+    if (matchUsrUnlock) {
+      const id = Number(matchUsrUnlock[1]);
       await pool.query('UPDATE usuarios_admin SET intentos_fallidos = 0, bloqueado_hasta = NULL WHERE id = $1', [id]);
       await logAuditoria(null, id, 'SuperAdmin', 'DESBLOQUEAR_CUENTA', 'SEGURIDAD', `Cuenta de usuario ID ${id} desbloqueada manualmente`, clientIp);
       return sendJson(res, 200, { ok: true });
@@ -855,7 +892,7 @@ const server = http.createServer(async (req, res) => {
     // --------------------------------------------------------------------------
     // 16. SEGURIDAD - AUDITORIA FORENSE (POSTGRESQL REAL)
     // --------------------------------------------------------------------------
-    if (pathname === '/api/admin/seguridad/auditoria') {
+    if (route === '/admin/seguridad/auditoria') {
       const result = await pool.query(
         `SELECT id, usuario_email, accion, modulo, detalles, ip_origen, fecha_hora::text
          FROM auditoria_seguridad
@@ -876,5 +913,6 @@ const server = http.createServer(async (req, res) => {
 server.listen(PORT, HOST, () => {
   console.log(`[INFO] Rapture Biometrics Backend en ejecucion en http://${HOST}:${PORT}`);
   console.log(`[INFO] Conectado a PostgreSQL 16 (api_db) en localhost:5432`);
-  console.log(`[INFO] Healthcheck disponible en http://${HOST}:${PORT}/api/health`);
+  console.log(`[INFO] Prefijo de version API configurado: ${API_PREFIX}`);
+  console.log(`[INFO] Healthcheck disponible en http://${HOST}:${PORT}${API_PREFIX}/health`);
 });

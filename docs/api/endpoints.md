@@ -2,7 +2,13 @@
 
 Este documento contiene la especificacion tecnica completa de la API REST para el Kiosko Biometrico y el Portal Administrativo.
 
-- **Base URL:** `http://127.0.0.1:3000` (Directo) o `/api` (A traves del proxy de Vite en desarrollo).
+- **Base URL Dinamica (.env):** 
+  - Frontend: Variable de entorno `VITE_API_BASE_URL` en `frontend/.env` (valor por defecto: `/api/v1`).
+  - Backend: Variable de entorno `API_PREFIX` en `.env` (valor por defecto: `/api/v1`).
+  - Si en el futuro se migra a una nueva version (ejemplo: `/api/v2`), **solo es necesario modificar el valor en el archivo .env** sin tocar rutas individuales en el codigo fuente.
+  - Servidor Directo: `http://127.0.0.1:3000/api/v1`
+  - Proxy de Desarrollo Vite: `http://localhost:5173/api/v1` (enruta automaticamente al puerto 3000)
+  - Retrocompatibilidad: El backend mantiene compatibilidad automatica tanto con `/api/v1`, `/api/v2`, como con el prefijo legado `/api`.
 - **Formato:** JSON (`Content-Type: application/json`).
 - **Autenticacion:** Cabecera `Authorization: Bearer <token>` requerida para rutas administrativas.
 
@@ -12,7 +18,7 @@ Este documento contiene la especificacion tecnica completa de la API REST para e
 
 ### 1.1 Verificacion de Estado de Salud
 Verifica la disponibilidad del backend y la conexion con el motor.
-- **Ruta:** `GET /api/health`
+- **Ruta:** `GET /api/v1/health` (o `GET /api/health`)
 - **Autenticacion:** No requerida.
 - **Respuesta Exitosa (200 OK):**
   ```json

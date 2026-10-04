@@ -250,20 +250,35 @@ export interface CreateUsuarioRequest {
 // ------------------------------------------------------------------------------
 // Configuración de URL Base y Sesión de Seguridad
 // ------------------------------------------------------------------------------
-const DEFAULT_API_URL = '';
+// Lee la variable VITE_API_BASE_URL del archivo .env (por defecto '/api/v1')
+// Permite modificar la versión o el host en un solo lugar (ej: /api/v2, http://localhost:3000/api/v2)
+export const DEFAULT_API_BASE_URL = (import.meta.env.VITE_API_BASE_URL || '/api/v1').replace(/\/+$/, '');
 
 export function getApiBaseUrl(): string {
   const custom = localStorage.getItem('rapture_api_url');
-  if (custom && custom.trim() !== '') return custom.trim();
-  return DEFAULT_API_URL;
+  if (custom && custom.trim() !== '') {
+    return custom.trim().replace(/\/+$/, '');
+  }
+  return DEFAULT_API_BASE_URL;
 }
 
 export function setApiBaseUrl(url: string) {
-  if (!url || url.trim() === '' || url.trim() === 'http://127.0.0.1:3000' || url.trim() === 'http://localhost:3000') {
+  if (!url || url.trim() === '' || url.trim() === DEFAULT_API_BASE_URL) {
     localStorage.removeItem('rapture_api_url');
   } else {
     localStorage.setItem('rapture_api_url', url.trim().replace(/\/+$/, ''));
   }
+}
+
+/**
+ * Construye la URL completa anteponiendo la base versionada configurada en .env
+ * Ejemplo:
+ *   buildApiUrl('/admin/sedes') -> '/api/v1/admin/sedes' (o 'http://localhost:3000/api/v2/admin/sedes')
+ */
+export function buildApiUrl(endpoint: string): string {
+  const base = getApiBaseUrl();
+  const normalized = endpoint.startsWith('/') ? endpoint : `/${endpoint}`;
+  return `${base}${normalized}`;
 }
 
 export function getAuthToken(): string | null {
@@ -295,12 +310,16 @@ export async function checkServerHealth(): Promise<boolean> {
   const candidateUrls: string[] = [];
 
   if (customUrl && customUrl.trim() !== '') {
-    candidateUrls.push(`${customUrl.trim().replace(/\/+$/, '')}/api/health`);
+    const clean = customUrl.trim().replace(/\/+$/, '');
+    candidateUrls.push(clean.endsWith('/health') ? clean : `${clean}/health`);
   }
-  // Always include relative proxy /api/health and direct 127.0.0.1:3000
+
+  // URL generada con buildApiUrl a partir de .env
+  candidateUrls.push(buildApiUrl('/health'));
+  candidateUrls.push('/api/v1/health');
   candidateUrls.push('/api/health');
+  candidateUrls.push('http://127.0.0.1:3000/api/v1/health');
   candidateUrls.push('http://127.0.0.1:3000/api/health');
-  candidateUrls.push('http://localhost:3000/api/health');
 
   for (const url of candidateUrls) {
     try {
@@ -312,7 +331,7 @@ export async function checkServerHealth(): Promise<boolean> {
         return true;
       }
     } catch {
-      // Continue to next candidate URL
+      // Continuar al siguiente candidato
     }
   }
   return false;
@@ -322,7 +341,7 @@ export async function checkServerHealth(): Promise<boolean> {
 // KIOSKO BIOMÉTRICO
 // ------------------------------------------------------------------------------
 export async function registrarEscaneo(payload: EscaneoRequest): Promise<EscaneoResponse> {
-  const url = `${getApiBaseUrl()}/api/escaneo`;
+  const url = buildApiUrl('/escaneo');
 
   try {
     const res = await fetch(url, {
@@ -347,7 +366,7 @@ export async function registrarEscaneo(payload: EscaneoRequest): Promise<Escaneo
 // ------------------------------------------------------------------------------
 
 export async function fetchDashboardMetrics(): Promise<DashboardMetrics> {
-  const url = `${getApiBaseUrl()}/api/admin/dashboard`;
+  const url = buildApiUrl('/admin/dashboard');
   const res = await fetch(url, { headers: getAuthHeaders() });
   if (!res.ok) {
     throw new Error(`Error ${res.status} al consultar métricas del sistema`);
@@ -356,7 +375,7 @@ export async function fetchDashboardMetrics(): Promise<DashboardMetrics> {
 }
 
 export async function fetchSedes(): Promise<Sede[]> {
-  const url = `${getApiBaseUrl()}/api/admin/sedes`;
+  const url = buildApiUrl('/admin/sedes');
   const res = await fetch(url, { headers: getAuthHeaders() });
   if (!res.ok) {
     throw new Error(`Error ${res.status} al consultar sedes`);
@@ -365,7 +384,7 @@ export async function fetchSedes(): Promise<Sede[]> {
 }
 
 export async function createSede(payload: CreateSedeRequest): Promise<Sede> {
-  const url = `${getApiBaseUrl()}/api/admin/sedes`;
+  const url = buildApiUrl('/admin/sedes');
   const res = await fetch(url, {
     method: 'POST',
     headers: getAuthHeaders(),
@@ -380,7 +399,7 @@ export async function createSede(payload: CreateSedeRequest): Promise<Sede> {
 
 export async function fetchDepartamentos(sedeId?: number): Promise<Departamento[]> {
   const q = sedeId ? `?sede_id=${sedeId}` : '';
-  const url = `${getApiBaseUrl()}/api/admin/departamentos${q}`;
+  const url = buildApiUrl(`/admin/departamentos${q}`);
   const res = await fetch(url, { headers: getAuthHeaders() });
   if (!res.ok) {
     throw new Error(`Error ${res.status} al consultar departamentos`);
@@ -389,7 +408,7 @@ export async function fetchDepartamentos(sedeId?: number): Promise<Departamento[
 }
 
 export async function createDepartamento(payload: CreateDepartamentoRequest): Promise<Departamento> {
-  const url = `${getApiBaseUrl()}/api/admin/departamentos`;
+  const url = buildApiUrl('/admin/departamentos');
   const res = await fetch(url, {
     method: 'POST',
     headers: getAuthHeaders(),
@@ -404,7 +423,7 @@ export async function createDepartamento(payload: CreateDepartamentoRequest): Pr
 
 export async function fetchCargos(departamentoId?: number): Promise<Cargo[]> {
   const q = departamentoId ? `?departamento_id=${departamentoId}` : '';
-  const url = `${getApiBaseUrl()}/api/admin/cargos${q}`;
+  const url = buildApiUrl(`/admin/cargos${q}`);
   const res = await fetch(url, { headers: getAuthHeaders() });
   if (!res.ok) {
     throw new Error(`Error ${res.status} al consultar cargos`);
@@ -413,7 +432,7 @@ export async function fetchCargos(departamentoId?: number): Promise<Cargo[]> {
 }
 
 export async function createCargo(payload: CreateCargoRequest): Promise<Cargo> {
-  const url = `${getApiBaseUrl()}/api/admin/cargos`;
+  const url = buildApiUrl('/admin/cargos');
   const res = await fetch(url, {
     method: 'POST',
     headers: getAuthHeaders(),
@@ -427,7 +446,7 @@ export async function createCargo(payload: CreateCargoRequest): Promise<Cargo> {
 }
 
 export async function fetchTurnos(): Promise<Turno[]> {
-  const url = `${getApiBaseUrl()}/api/admin/turnos`;
+  const url = buildApiUrl('/admin/turnos');
   const res = await fetch(url, { headers: getAuthHeaders() });
   if (!res.ok) {
     throw new Error(`Error ${res.status} al consultar turnos`);
@@ -436,7 +455,7 @@ export async function fetchTurnos(): Promise<Turno[]> {
 }
 
 export async function createTurno(payload: CreateTurnoRequest): Promise<Turno> {
-  const url = `${getApiBaseUrl()}/api/admin/turnos`;
+  const url = buildApiUrl('/admin/turnos');
   const res = await fetch(url, {
     method: 'POST',
     headers: getAuthHeaders(),
@@ -455,7 +474,7 @@ export async function fetchEmpleados(sedeId?: number, deptoId?: number): Promise
   if (deptoId) params.append('departamento_id', deptoId.toString());
   const q = params.toString() ? `?${params.toString()}` : '';
 
-  const url = `${getApiBaseUrl()}/api/admin/empleados${q}`;
+  const url = buildApiUrl(`/admin/empleados${q}`);
   const res = await fetch(url, { headers: getAuthHeaders() });
   if (!res.ok) {
     throw new Error(`Error ${res.status} al consultar colaboradores`);
@@ -464,7 +483,7 @@ export async function fetchEmpleados(sedeId?: number, deptoId?: number): Promise
 }
 
 export async function createEmpleado(payload: CreateEmpleadoRequest): Promise<{ exito: boolean; mensaje: string }> {
-  const url = `${getApiBaseUrl()}/api/admin/empleados`;
+  const url = buildApiUrl('/admin/empleados');
   const res = await fetch(url, {
     method: 'POST',
     headers: getAuthHeaders(),
@@ -478,7 +497,7 @@ export async function createEmpleado(payload: CreateEmpleadoRequest): Promise<{ 
 }
 
 export async function toggleEmpleadoEstado(cedula: number, activo: boolean): Promise<void> {
-  const url = `${getApiBaseUrl()}/api/admin/empleados/${cedula}/estado`;
+  const url = buildApiUrl(`/admin/empleados/${cedula}/estado`);
   const res = await fetch(url, {
     method: 'POST',
     headers: getAuthHeaders(),
@@ -502,7 +521,7 @@ export async function fetchReporteAsistencias(
   if (deptoId) params.append('departamento_id', deptoId.toString());
   const q = params.toString() ? `?${params.toString()}` : '';
 
-  const url = `${getApiBaseUrl()}/api/admin/asistencias${q}`;
+  const url = buildApiUrl(`/admin/asistencias${q}`);
   const res = await fetch(url, { headers: getAuthHeaders() });
   if (!res.ok) {
     throw new Error(`Error ${res.status} al consultar auditoría de asistencias`);
@@ -515,7 +534,7 @@ export async function fetchReporteAsistencias(
 // ------------------------------------------------------------------------------
 
 export async function loginAdmin(identifier: string, password: string): Promise<LoginResponse> {
-  const url = `${getApiBaseUrl()}/api/auth/login`;
+  const url = buildApiUrl('/auth/login');
   const res = await fetch(url, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
@@ -529,7 +548,7 @@ export async function loginAdmin(identifier: string, password: string): Promise<
 }
 
 export async function logoutAdmin(email?: string): Promise<void> {
-  const url = `${getApiBaseUrl()}/api/auth/logout`;
+  const url = buildApiUrl('/auth/logout');
   try {
     await fetch(url, {
       method: 'POST',
@@ -542,7 +561,7 @@ export async function logoutAdmin(email?: string): Promise<void> {
 }
 
 export async function fetchRoles(): Promise<Rol[]> {
-  const url = `${getApiBaseUrl()}/api/admin/seguridad/roles`;
+  const url = buildApiUrl('/admin/seguridad/roles');
   const res = await fetch(url, { headers: getAuthHeaders() });
   if (!res.ok) {
     throw new Error(`Error ${res.status} al consultar roles`);
@@ -551,7 +570,7 @@ export async function fetchRoles(): Promise<Rol[]> {
 }
 
 export async function createRole(payload: CreateRoleRequest): Promise<Rol> {
-  const url = `${getApiBaseUrl()}/api/admin/seguridad/roles`;
+  const url = buildApiUrl('/admin/seguridad/roles');
   const res = await fetch(url, {
     method: 'POST',
     headers: getAuthHeaders(),
@@ -565,7 +584,7 @@ export async function createRole(payload: CreateRoleRequest): Promise<Rol> {
 }
 
 export async function fetchModelos(): Promise<ModeloRecurso[]> {
-  const url = `${getApiBaseUrl()}/api/admin/seguridad/modelos`;
+  const url = buildApiUrl('/admin/seguridad/modelos');
   const res = await fetch(url, { headers: getAuthHeaders() });
   if (!res.ok) {
     throw new Error(`Error ${res.status} al consultar modelos de recursos`);
@@ -574,7 +593,7 @@ export async function fetchModelos(): Promise<ModeloRecurso[]> {
 }
 
 export async function fetchPoliticasByRol(rolId: number): Promise<RolPoliticaModelo[]> {
-  const url = `${getApiBaseUrl()}/api/admin/seguridad/roles/${rolId}/politicas`;
+  const url = buildApiUrl(`/admin/seguridad/roles/${rolId}/politicas`);
   const res = await fetch(url, { headers: getAuthHeaders() });
   if (!res.ok) {
     throw new Error(`Error ${res.status} al consultar políticas del rol`);
@@ -583,7 +602,7 @@ export async function fetchPoliticasByRol(rolId: number): Promise<RolPoliticaMod
 }
 
 export async function updateRolPoliticas(rolId: number, politicas: RolPoliticaModelo[]): Promise<void> {
-  const url = `${getApiBaseUrl()}/api/admin/seguridad/roles/${rolId}/politicas`;
+  const url = buildApiUrl(`/admin/seguridad/roles/${rolId}/politicas`);
   const res = await fetch(url, {
     method: 'PUT',
     headers: getAuthHeaders(),
@@ -596,7 +615,7 @@ export async function updateRolPoliticas(rolId: number, politicas: RolPoliticaMo
 }
 
 export async function fetchUsuariosAdmin(): Promise<UsuarioAdmin[]> {
-  const url = `${getApiBaseUrl()}/api/admin/seguridad/usuarios`;
+  const url = buildApiUrl('/admin/seguridad/usuarios');
   const res = await fetch(url, { headers: getAuthHeaders() });
   if (!res.ok) {
     throw new Error(`Error ${res.status} al consultar usuarios administrativos`);
@@ -605,7 +624,7 @@ export async function fetchUsuariosAdmin(): Promise<UsuarioAdmin[]> {
 }
 
 export async function createUsuarioAdmin(payload: CreateUsuarioRequest): Promise<void> {
-  const url = `${getApiBaseUrl()}/api/admin/seguridad/usuarios`;
+  const url = buildApiUrl('/admin/seguridad/usuarios');
   const res = await fetch(url, {
     method: 'POST',
     headers: getAuthHeaders(),
@@ -618,7 +637,7 @@ export async function createUsuarioAdmin(payload: CreateUsuarioRequest): Promise
 }
 
 export async function toggleUsuarioEstado(id: number, activo: boolean): Promise<void> {
-  const url = `${getApiBaseUrl()}/api/admin/seguridad/usuarios/${id}/estado`;
+  const url = buildApiUrl(`/admin/seguridad/usuarios/${id}/estado`);
   const res = await fetch(url, {
     method: 'POST',
     headers: getAuthHeaders(),
@@ -630,7 +649,7 @@ export async function toggleUsuarioEstado(id: number, activo: boolean): Promise<
 }
 
 export async function unlockUsuario(id: number): Promise<void> {
-  const url = `${getApiBaseUrl()}/api/admin/seguridad/usuarios/${id}/desbloquear`;
+  const url = buildApiUrl(`/admin/seguridad/usuarios/${id}/desbloquear`);
   const res = await fetch(url, {
     method: 'POST',
     headers: getAuthHeaders(),
@@ -641,7 +660,7 @@ export async function unlockUsuario(id: number): Promise<void> {
 }
 
 export async function fetchAuditoriaSeguridad(): Promise<AuditoriaSeguridad[]> {
-  const url = `${getApiBaseUrl()}/api/admin/seguridad/auditoria`;
+  const url = buildApiUrl('/admin/seguridad/auditoria');
   const res = await fetch(url, { headers: getAuthHeaders() });
   if (!res.ok) {
     throw new Error(`Error ${res.status} al consultar auditoría forense`);
