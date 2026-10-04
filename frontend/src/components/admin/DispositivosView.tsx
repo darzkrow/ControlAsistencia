@@ -28,6 +28,7 @@ import {
   Wifi,
   Radio,
 } from 'lucide-react';
+import { formatTimeTo12h } from '../../utils/dateUtils';
 
 export const DispositivosView: React.FC = () => {
   const { hasPermission } = useAuth();
@@ -734,7 +735,7 @@ export const DispositivosView: React.FC = () => {
                   <div style={{ display: 'flex', justifyContent: 'space-between' }}>
                     <span style={{ color: 'var(--text-secondary)' }}>Ultimo Diagnostico:</span>
                     <span style={{ color: 'var(--text-muted)' }}>
-                      {dev.ultimo_ping ? new Date(dev.ultimo_ping).toLocaleTimeString() : 'Pendiente'}
+                      {dev.ultimo_ping ? formatTimeTo12h(dev.ultimo_ping, true) : 'Pendiente'}
                     </span>
                   </div>
                 </div>

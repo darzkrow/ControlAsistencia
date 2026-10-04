@@ -1,13 +1,15 @@
 import React, { useState, useEffect } from 'react';
 import { Fingerprint, Clock, Server, Volume2, VolumeX, Settings, Shield } from 'lucide-react';
 
+import { formatTimeTo12h, formatDateToLocal, getTimezoneBadge } from '../utils/dateUtils';
+
 interface HeaderProps {
   serverConnected: boolean;
   onOpenSettings: () => void;
   soundEnabled: boolean;
   onToggleSound: () => void;
   onOpenAdmin: () => void;
-  onRefreshHealth?: () => void;
+  onRefreshHealth: () => void;
 }
 
 export const Header: React.FC<HeaderProps> = ({
@@ -24,22 +26,8 @@ export const Header: React.FC<HeaderProps> = ({
   useEffect(() => {
     const updateClock = () => {
       const now = new Date();
-      setTime(
-        now.toLocaleTimeString('es-ES', {
-          hour: '2-digit',
-          minute: '2-digit',
-          second: '2-digit',
-          hour12: false,
-        })
-      );
-      setDate(
-        now.toLocaleDateString('es-ES', {
-          weekday: 'long',
-          year: 'numeric',
-          month: 'long',
-          day: 'numeric',
-        })
-      );
+      setTime(formatTimeTo12h(now, true));
+      setDate(formatDateToLocal(now, 'long'));
     };
 
     updateClock();
@@ -126,16 +114,31 @@ export const Header: React.FC<HeaderProps> = ({
             {time || '00:00:00'}
           </span>
         </div>
-        <span
-          style={{
-            fontSize: '0.72rem',
-            color: 'var(--text-secondary)',
-            textTransform: 'capitalize',
-            letterSpacing: '0.02em',
-          }}
-        >
-          {date}
-        </span>
+        <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+          <span
+            style={{
+              fontSize: '0.72rem',
+              color: 'var(--text-secondary)',
+              textTransform: 'capitalize',
+              letterSpacing: '0.02em',
+            }}
+          >
+            {date}
+          </span>
+          <span
+            style={{
+              fontSize: '0.62rem',
+              padding: '1px 5px',
+              borderRadius: '4px',
+              background: 'rgba(0, 242, 254, 0.08)',
+              color: 'var(--accent-cyan)',
+              border: '1px solid rgba(0, 242, 254, 0.2)',
+              fontWeight: 600,
+            }}
+          >
+            {getTimezoneBadge()}
+          </span>
+        </div>
       </div>
 
       {/* Right Controls and Connection Pill */}

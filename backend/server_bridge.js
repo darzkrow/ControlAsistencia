@@ -30,13 +30,17 @@ if (fs.existsSync(envPath)) {
 const PORT = Number(process.env.SERVER_PORT) || 3000;
 const HOST = process.env.SERVER_HOST || '127.0.0.1';
 const API_PREFIX = (process.env.API_PREFIX || '/api/v1').replace(/\/+$/, '');
+const TIMEZONE = process.env.TIMEZONE || 'America/Caracas';
+const TIME_FORMAT = process.env.TIME_FORMAT || '12h';
+process.env.TZ = TIMEZONE;
 
-// Conexion al Pool de PostgreSQL (rapture-db)
+// Conexion al Pool de PostgreSQL (rapture-db) con zona horaria parametrizada
 const pool = new Pool({
   connectionString: process.env.DATABASE_URL || 'postgres://admin:secreto@127.0.0.1:5432/api_db',
   max: 20,
   idleTimeoutMillis: 30000,
   connectionTimeoutMillis: 3000,
+  options: `-c timezone=${TIMEZONE}`,
 });
 
 pool.on('error', (err) => {
@@ -301,6 +305,8 @@ const server = http.createServer(async (req, res) => {
         service: 'rapture-biometrics-backend',
         engine: 'Axum / PostgreSQL Direct + Redis Micro-Batching',
         version: '2.1.0',
+        timezone: TIMEZONE,
+        time_format: TIME_FORMAT,
         server_connected: true,
         database_connected: !!dbCheck.rows[0],
         redis_connected: redisConnected,
@@ -379,15 +385,25 @@ const server = http.createServer(async (req, res) => {
         }
       }
 
-      // Evaluacion de puntualidad en memoria
+      // Evaluacion de puntualidad en memoria calculada segun TIMEZONE (por defecto America/Caracas)
       let puntualidad = 'Puntual';
       let minutosRetardo = 0;
       if (emp.turno_hora_entrada && tipoEvento === 'entrada') {
         const now = new Date();
+        const tzFormatter = new Intl.DateTimeFormat('en-US', {
+          timeZone: TIMEZONE,
+          hour: 'numeric',
+          minute: 'numeric',
+          hour12: false,
+        });
+        const timeParts = tzFormatter.formatToParts(now);
+        const curHour = Number(timeParts.find(p => p.type === 'hour')?.value || now.getHours());
+        const curMin = Number(timeParts.find(p => p.type === 'minute')?.value || now.getMinutes());
+        const currentMins = curHour * 60 + curMin;
+
         const parts = emp.turno_hora_entrada.split(':');
         const scheduledMins = Number(parts[0]) * 60 + Number(parts[1]);
         const tolerance = emp.turno_tolerancia || 15;
-        const currentMins = now.getHours() * 60 + now.getMinutes();
         if (currentMins > scheduledMins + tolerance) {
           puntualidad = 'Retardo';
           minutosRetardo = currentMins - scheduledMins;
@@ -1097,5 +1113,6 @@ server.listen(PORT, HOST, () => {
   console.log(`[INFO] Rapture Biometrics Backend en ejecucion en http://${HOST}:${PORT}`);
   console.log(`[INFO] Conectado a PostgreSQL 16 (api_db) en localhost:5432`);
   console.log(`[INFO] Prefijo de version API configurado: ${API_PREFIX}`);
+  console.log(`[INFO] Zona horaria configurada: ${TIMEZONE} (Formato ${TIME_FORMAT})`);
   console.log(`[INFO] Healthcheck disponible en http://${HOST}:${PORT}${API_PREFIX}/health`);
 });

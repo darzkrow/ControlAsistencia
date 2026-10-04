@@ -16,6 +16,7 @@ import {
   Camera,
   RefreshCw,
 } from 'lucide-react';
+import { formatTimeTo12h } from '../../utils/dateUtils';
 
 export const AsistenciasAuditoria: React.FC = () => {
   const [reportes, setReportes] = useState<AsistenciaReporte[]>([]);
@@ -56,8 +57,8 @@ export const AsistenciasAuditoria: React.FC = () => {
       `"${r.nombre_sede || ''}"`,
       `"${r.nombre_departamento || ''}"`,
       `"${r.nombre_cargo || ''}"`,
-      r.hora_entrada ? r.hora_entrada.split('T')[1] : '',
-      r.hora_salida ? r.hora_salida.split('T')[1] : '',
+      r.hora_entrada ? formatTimeTo12h(r.hora_entrada, true) : '',
+      r.hora_salida ? formatTimeTo12h(r.hora_salida, true) : '',
       r.minutos_trabajados,
       r.puntualidad || '',
       r.minutos_retardo,
@@ -246,10 +247,7 @@ export const AsistenciasAuditoria: React.FC = () => {
                   ? 'var(--accent-amber)'
                   : 'var(--accent-cyan)';
 
-                const formatTime = (ts?: string) => {
-                  if (!ts) return '--:--:--';
-                  return ts.includes('T') ? ts.split('T')[1].substring(0, 8) : ts;
-                };
+                const formatTime = (ts?: string) => formatTimeTo12h(ts, true);
 
                 return (
                   <tr key={`${r.empleado_cedula}-${r.fecha}-${i}`} style={{ borderBottom: '1px solid var(--border-subtle)' }}>
