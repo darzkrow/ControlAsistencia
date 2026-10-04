@@ -37,7 +37,32 @@ services:
         max-file: "3"
 
   # ============================================================================
-  # 2. Backend Biométrico Rapture (Rust Axum + OpenCV)
+  # 2. Servicio de Caché en Memoria y Buffer de Ingestión (Redis 7)
+  # ============================================================================
+  redis:
+    image: redis:7-alpine
+    container_name: rapture-redis
+    restart: unless-stopped
+    command: ["redis-server", "--appendonly", "yes", "--maxmemory", "256mb", "--maxmemory-policy", "volatile-lru"]
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+    networks:
+      - rapture-network
+    deploy:
+      resources:
+        limits:
+          cpus: '0.5'
+          memory: 256M
+
+  # ============================================================================
+  # 3. Backend Biométrico Rapture (Rust Axum + OpenCV)
   # ============================================================================
   backend:
     build:
@@ -48,10 +73,13 @@ services:
     depends_on:
       db:
         condition: service_healthy
+      redis:
+        condition: service_healthy
     ports:
       - "3000:3000"
     environment:
       DATABASE_URL: postgres://${POSTGRES_USER:-admin}:${POSTGRES_PASSWORD:-secreto}@db:5432/${POSTGRES_DB:-api_db}
+      REDIS_URL: redis://redis:6379
       SERVER_HOST: 0.0.0.0
       SERVER_PORT: 3000
       COOLDOWN_SECONDS: 15
@@ -92,5 +120,7 @@ networks:
 volumes:
   postgres_data:
     name: rapture_postgres_data
+  redis_data:
+    name: rapture_redis_data
   uploads_data:
     name: rapture_uploads_data

@@ -1,6 +1,7 @@
 const http = require('node:http');
 const crypto = require('node:crypto');
 const { Pool } = require('pg');
+const Redis = require('ioredis');
 
 const PORT = 3000;
 const HOST = '127.0.0.1';
@@ -16,6 +17,171 @@ const pool = new Pool({
 pool.on('error', (err) => {
   console.error('[ERROR] Error inesperado en el Pool de PostgreSQL:', err.message);
 });
+
+// Conexion a Redis (Cache de Lectura y Buffer de Ingestion)
+const REDIS_URL = process.env.REDIS_URL || 'redis://127.0.0.1:6379';
+let redisConnected = false;
+const redis = new Redis(REDIS_URL, {
+  retryStrategy(times) {
+    return Math.min(times * 200, 3000);
+  },
+  maxRetriesPerRequest: 2,
+  lazyConnect: true,
+});
+
+redis.connect().then(() => {
+  redisConnected = true;
+  console.log('[INFO] Conectado exitosamente a Redis (Cache & Ingestion Buffer)');
+}).catch((err) => {
+  redisConnected = false;
+  console.warn('[WARN] Redis no disponible en inicio. Activando buffer en memoria local:', err.message);
+});
+
+redis.on('connect', () => {
+  redisConnected = true;
+  console.log('[INFO] Redis reconectado exitosamente');
+});
+redis.on('error', () => {
+  redisConnected = false;
+});
+
+// ============================================================================
+// MOTOR DE INGESTION POR LOTES (MICRO-BATCHING PIPELINE)
+// ============================================================================
+const punchQueue = [];
+let isFlushing = false;
+let totalBatchesFlushed = 0;
+let totalEventsPersisted = 0;
+let lastBatchTimeMs = 0;
+const BATCH_MAX_SIZE = 50;
+const BATCH_INTERVAL_MS = 200;
+
+async function flushPunchBatch() {
+  if (isFlushing || punchQueue.length === 0) return;
+  isFlushing = true;
+  const start = Date.now();
+
+  const batch = punchQueue.splice(0, BATCH_MAX_SIZE);
+  if (batch.length === 0) {
+    isFlushing = false;
+    return;
+  }
+
+  const client = await pool.connect();
+  try {
+    await client.query('BEGIN');
+
+    // 1. Insercion masiva en eventos_lector (Multi-row INSERT sin bloqueos de tabla)
+    const valuePlaceholders = [];
+    const flatParams = [];
+    batch.forEach((evt, idx) => {
+      const offset = idx * 4;
+      valuePlaceholders.push(`($${offset + 1}, $${offset + 2}, $${offset + 3}, $${offset + 4})`);
+      flatParams.push(evt.empleado_cedula, evt.fecha_hora, evt.tipo_evento.toUpperCase(), evt.metodo_auth);
+    });
+
+    await client.query(
+      `INSERT INTO eventos_lector (empleado_cedula, fecha_hora, tipo_evento, metodo_auth)
+       VALUES ${valuePlaceholders.join(', ')}`,
+      flatParams
+    );
+
+    // 2. Procesamiento agrupado de jornada_diaria por empleado unico
+    const byEmp = new Map();
+    for (const evt of batch) {
+      byEmp.set(evt.empleado_cedula, evt);
+    }
+
+    for (const [cedula, evt] of byEmp.entries()) {
+      const jornadaRes = await client.query(
+        `SELECT hora_entrada, hora_salida, estado FROM jornada_diaria WHERE empleado_cedula = $1 AND fecha = CURRENT_DATE FOR UPDATE`,
+        [cedula]
+      );
+
+      if (jornadaRes.rows.length === 0) {
+        // Primera marcacion del dia -> ENTRADA
+        await client.query(
+          `INSERT INTO jornada_diaria (empleado_cedula, fecha, hora_entrada, estado, minutos_trabajados, puntualidad, minutos_retardo, ultima_actualizacion)
+           VALUES ($1, CURRENT_DATE, $2, 'En curso', 0, $3, $4, NOW())
+           ON CONFLICT (empleado_cedula, fecha) DO NOTHING`,
+          [cedula, evt.fecha_hora, evt.puntualidad, evt.minutos_retardo]
+        );
+      } else {
+        // Segunda o posterior marcacion -> SALIDA
+        const horaEntrada = jornadaRes.rows[0].hora_entrada;
+        const diffRes = await client.query(
+          `SELECT ROUND(EXTRACT(EPOCH FROM ($1::timestamptz - $2::timestamptz)) / 60)::int as minutos`,
+          [evt.fecha_hora, horaEntrada]
+        );
+        const mins = Math.max(0, diffRes.rows[0]?.minutos || 0);
+
+        await client.query(
+          `UPDATE jornada_diaria
+           SET hora_salida = $1,
+               minutos_trabajados = $2,
+               estado = 'Completada',
+               ultima_actualizacion = NOW()
+           WHERE empleado_cedula = $3 AND fecha = CURRENT_DATE`,
+          [evt.fecha_hora, mins, cedula]
+        );
+      }
+    }
+
+    await client.query('COMMIT');
+    totalBatchesFlushed++;
+    totalEventsPersisted += batch.length;
+    lastBatchTimeMs = Date.now() - start;
+  } catch (err) {
+    await client.query('ROLLBACK');
+    console.error('[ERROR] Fallo en transaccion de micro-batching, re-encolando eventos:', err.message);
+    punchQueue.unshift(...batch);
+  } finally {
+    client.release();
+    isFlushing = false;
+  }
+}
+
+// Iniciar worker periodico de vaciado de micro-lotes
+setInterval(flushPunchBatch, BATCH_INTERVAL_MS);
+
+// Helpers de Cache (Cache-Aside Pattern)
+async function getCachedEmployee(cedula) {
+  if (redisConnected) {
+    try {
+      const cached = await redis.get(`emp:${cedula}`);
+      if (cached) return JSON.parse(cached);
+    } catch (e) {}
+  }
+
+  const empRes = await pool.query(
+    `SELECT e.cedula, e.nombre_completo, e.departamento, e.activo,
+            s.nombre as nombre_sede,
+            t.hora_entrada as turno_hora_entrada,
+            t.tolerancia_minutos as turno_tolerancia
+     FROM empleados e
+     LEFT JOIN sedes s ON e.sede_id = s.id
+     LEFT JOIN turnos_horarios t ON e.turno_id = t.id
+     WHERE e.cedula = $1`,
+    [cedula]
+  );
+
+  const emp = empRes.rows[0] || null;
+  if (emp && redisConnected) {
+    try {
+      await redis.set(`emp:${cedula}`, JSON.stringify(emp), 'EX', 1800); // TTL 30 minutos
+    } catch (e) {}
+  }
+  return emp;
+}
+
+async function invalidateEmployeeCache(cedula) {
+  if (redisConnected) {
+    try {
+      await redis.del(`emp:${cedula}`);
+      await redis.del(`jornada_hoy:${cedula}`);
+    } catch (e) {}
+  }
+}
 
 // Cache en memoria para sesiones activas (TTL 8 horas)
 const activeSessions = new Map(); // token -> { userId, email, rolId, expiresAt }
@@ -97,16 +263,23 @@ const server = http.createServer(async (req, res) => {
       return sendJson(res, 200, {
         status: 'ok',
         service: 'rapture-biometrics-backend',
-        engine: 'Axum / PostgreSQL Direct',
-        version: '2.0.4',
+        engine: 'Axum / PostgreSQL Direct + Redis Micro-Batching',
+        version: '2.1.0',
         server_connected: true,
         database_connected: !!dbCheck.rows[0],
+        redis_connected: redisConnected,
+        batch_engine: {
+          queue_length: punchQueue.length,
+          batches_flushed: totalBatchesFlushed,
+          events_persisted: totalEventsPersisted,
+          last_batch_time_ms: lastBatchTimeMs,
+        },
         timestamp: new Date().toISOString(),
       });
     }
 
     // --------------------------------------------------------------------------
-    // 2. KIOSKO BIOMETRICO - REGISTRO DE ASISTENCIA (TRANSACCION REAL EN BD)
+    // 2. KIOSKO BIOMETRICO - REGISTRO ASINCRONO POR LOTES (SUB-MILISEGUNDO)
     // --------------------------------------------------------------------------
     if (pathname === '/api/escaneo' && req.method === 'POST') {
       const body = await parseBody(req);
@@ -116,15 +289,23 @@ const server = http.createServer(async (req, res) => {
         return sendJson(res, 400, { es_empleado: false, mensaje: 'Numero de identificacion invalido', tipo_evento: 'rechazado' });
       }
 
-      const empRes = await pool.query(
-        `SELECT e.cedula, e.nombre_completo, e.departamento, e.activo, s.nombre as nombre_sede
-         FROM empleados e
-         LEFT JOIN sedes s ON e.sede_id = s.id
-         WHERE e.cedula = $1`,
-        [idNum]
-      );
+      // Verificacion atomica de Cooldown Anti-Passback en Redis (< 0.5 ms)
+      if (redisConnected) {
+        try {
+          const cdKey = `cooldown:${idNum}`;
+          const isAllowed = await redis.set(cdKey, '1', 'EX', 10, 'NX');
+          if (!isAllowed) {
+            return sendJson(res, 200, {
+              es_empleado: true,
+              mensaje: 'Marcacion reciente ya registrada. Por favor espere unos segundos.',
+              tipo_evento: 'cooldown',
+            });
+          }
+        } catch (e) {}
+      }
 
-      const emp = empRes.rows[0];
+      // Consulta de datos de colaborador desde Cache-Aside (< 0.5 ms)
+      const emp = await getCachedEmployee(idNum);
       if (!emp || !emp.activo) {
         return sendJson(res, 200, {
           es_empleado: false,
@@ -133,96 +314,75 @@ const server = http.createServer(async (req, res) => {
         });
       }
 
-      // Evaluar la jornada del dia actual (ACID)
-      const client = await pool.connect();
-      try {
-        await client.query('BEGIN');
-
-        const jornadaRes = await client.query(
-          `SELECT * FROM jornada_diaria WHERE empleado_cedula = $1 AND fecha = CURRENT_DATE FOR UPDATE`,
-          [idNum]
-        );
-
-        let tipoEvento = 'entrada';
-        let minutosTrabajados = 0;
-
-        // Consultar turno del empleado para evaluar puntualidad
-        const turnoRes = await client.query(
-          `SELECT t.hora_entrada, t.tolerancia_minutos
-           FROM empleados e
-           LEFT JOIN turnos_horarios t ON e.turno_id = t.id
-           WHERE e.cedula = $1`,
-          [idNum]
-        );
-        const turno = turnoRes.rows[0];
-        let puntualidad = 'Puntual';
-        let minutosRetardo = 0;
-
-        if (turno && turno.hora_entrada) {
-          const evalRes = await client.query(
-            `SELECT (NOW()::time > ($1::time + ($2 || ' minutes')::interval)) as es_retardo,
-                    GREATEST(0, ROUND(EXTRACT(EPOCH FROM (NOW()::time - $1::time)) / 60))::int as retardo_mins`,
-            [turno.hora_entrada, turno.tolerancia_minutos || 15]
-          );
-          if (evalRes.rows[0]?.es_retardo) {
-            puntualidad = 'Retardo';
-            minutosRetardo = evalRes.rows[0]?.retardo_mins || 0;
-          }
-        }
-
-        if (jornadaRes.rows.length === 0) {
-          // Primer marcaje del dia -> ENTRADA
-          tipoEvento = 'entrada';
-          await client.query(
-            `INSERT INTO jornada_diaria (empleado_cedula, fecha, hora_entrada, estado, minutos_trabajados, puntualidad, minutos_retardo, ultima_actualizacion)
-             VALUES ($1, CURRENT_DATE, NOW(), 'En curso', 0, $2, $3, NOW())`,
-            [idNum, puntualidad, minutosRetardo]
-          );
-        } else {
-          // Segundo o posterior marcaje del dia -> SALIDA
-          const diffRes = await client.query(
-            `SELECT ROUND(EXTRACT(EPOCH FROM (NOW() - hora_entrada)) / 60)::int as minutos FROM jornada_diaria WHERE empleado_cedula = $1 AND fecha = CURRENT_DATE`,
-            [idNum]
-          );
-          minutosTrabajados = Math.max(0, diffRes.rows[0]?.minutos || 0);
-
-          await client.query(
-            `UPDATE jornada_diaria
-             SET hora_salida = NOW(),
-                 minutos_trabajados = $2,
-                 estado = 'Completada',
-                 ultima_actualizacion = NOW()
-             WHERE empleado_cedula = $1 AND fecha = CURRENT_DATE`,
-            [idNum, minutosTrabajados]
-          );
-        }
-
-        // Registrar evento inmutable de auditoria del lector (metodo_auth)
-        const metodoAuth = (body.metodo || 'FACIAL').toUpperCase();
-        await client.query(
-          `INSERT INTO eventos_lector (empleado_cedula, fecha_hora, tipo_evento, foto_path, metodo_auth)
-           VALUES ($1, NOW(), $2, $3, $4)`,
-          [idNum, tipoEvento.toUpperCase(), null, metodoAuth]
-        );
-
-        await client.query('COMMIT');
-
-        const accionTxt = tipoEvento === 'entrada' ? 'Entrada registrada satisfactoriamente.' : 'Salida registrada satisfactoriamente.';
-        return sendJson(res, 200, {
-          es_empleado: true,
-          mensaje: `Bienvenido/a, ${emp.nombre_completo}! ${accionTxt}`,
-          nombre_completo: emp.nombre_completo,
-          departamento: emp.departamento || 'General',
-          tipo_evento: tipoEvento,
-          minutos_acumulados: minutosTrabajados,
-        });
-      } catch (err) {
-        await client.query('ROLLBACK');
-        console.error('[ERROR] Error en transaccion de escaneo:', err);
-        return sendJson(res, 500, { error: 'Error interno al procesar el marcaje' });
-      } finally {
-        client.release();
+      // Determinar tipo de evento (entrada / salida) usando cache o consulta rapida
+      let tipoEvento = 'entrada';
+      let jornadaEstado = null;
+      if (redisConnected) {
+        try {
+          jornadaEstado = await redis.get(`jornada_hoy:${idNum}`);
+        } catch (e) {}
       }
+
+      if (!jornadaEstado) {
+        const jRes = await pool.query(
+          `SELECT estado FROM jornada_diaria WHERE empleado_cedula = $1 AND fecha = CURRENT_DATE`,
+          [idNum]
+        );
+        jornadaEstado = jRes.rows[0]?.estado || 'no_iniciada';
+      }
+
+      if (jornadaEstado === 'En curso') {
+        tipoEvento = 'salida';
+        if (redisConnected) {
+          try { await redis.set(`jornada_hoy:${idNum}`, 'Completada', 'EX', 86400); } catch (e) {}
+        }
+      } else {
+        tipoEvento = 'entrada';
+        if (redisConnected) {
+          try { await redis.set(`jornada_hoy:${idNum}`, 'En curso', 'EX', 86400); } catch (e) {}
+        }
+      }
+
+      // Evaluacion de puntualidad en memoria
+      let puntualidad = 'Puntual';
+      let minutosRetardo = 0;
+      if (emp.turno_hora_entrada && tipoEvento === 'entrada') {
+        const now = new Date();
+        const parts = emp.turno_hora_entrada.split(':');
+        const scheduledMins = Number(parts[0]) * 60 + Number(parts[1]);
+        const tolerance = emp.turno_tolerancia || 15;
+        const currentMins = now.getHours() * 60 + now.getMinutes();
+        if (currentMins > scheduledMins + tolerance) {
+          puntualidad = 'Retardo';
+          minutosRetardo = currentMins - scheduledMins;
+        }
+      }
+
+      // Encolar evento en buffer de ingestion asincrono (Micro-Batching)
+      const metodoAuth = (body.metodo || 'FACIAL').toUpperCase();
+      const punchEvent = {
+        empleado_cedula: idNum,
+        fecha_hora: new Date().toISOString(),
+        tipo_evento: tipoEvento,
+        metodo_auth: metodoAuth,
+        puntualidad,
+        minutos_retardo: minutosRetardo,
+      };
+
+      punchQueue.push(punchEvent);
+      if (punchQueue.length >= BATCH_MAX_SIZE) {
+        setImmediate(flushPunchBatch);
+      }
+
+      const accionTxt = tipoEvento === 'entrada' ? 'Entrada registrada satisfactoriamente.' : 'Salida registrada satisfactoriamente.';
+      return sendJson(res, 200, {
+        es_empleado: true,
+        mensaje: `Bienvenido/a, ${emp.nombre_completo}! ${accionTxt}`,
+        nombre_completo: emp.nombre_completo,
+        departamento: emp.departamento || 'General',
+        tipo_evento: tipoEvento,
+        minutos_acumulados: 0,
+      });
     }
 
     // --------------------------------------------------------------------------
@@ -526,6 +686,7 @@ const server = http.createServer(async (req, res) => {
           [cedula, b.nombre_completo, b.email, b.telefono, deptoNombre, b.sede_id, b.departamento_id, b.cargo_id, b.turno_id, b.template_huella]
         );
 
+        await invalidateEmployeeCache(cedula);
         return sendJson(res, 201, { exito: true, mensaje: `Colaborador '${b.nombre_completo}' registrado exitosamente en PostgreSQL.` });
       }
     }
@@ -535,6 +696,7 @@ const server = http.createServer(async (req, res) => {
       const cedula = Number(parts[4]);
       const b = await parseBody(req);
       await pool.query('UPDATE empleados SET activo = $1 WHERE cedula = $2', [b.activo, cedula]);
+      await invalidateEmployeeCache(cedula);
       return sendJson(res, 200, { ok: true });
     }
 
