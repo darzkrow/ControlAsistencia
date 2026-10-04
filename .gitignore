@@ -1,0 +1,36 @@
+# Rust build artifacts
+/target
+backend/target/
+**/target/
+**/*.rs.bk
+
+# Node.js and Frontend artifacts
+node_modules/
+frontend/node_modules/
+**/node_modules/
+frontend/dist/
+dist/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# Environment and sensitive credentials
+.env
+.env.local
+.env.*.local
+*.pem
+*.key
+
+# Application upload storage
+backend/uploads/fotos/*.jpg
+uploads/fotos/*.jpg
+!backend/uploads/fotos/.gitkeep
+!uploads/fotos/.gitkeep
+
+# System and editor files
+.DS_Store
+Thumbs.db
+*.swp
+*.swo
+.vscode/
+.idea/

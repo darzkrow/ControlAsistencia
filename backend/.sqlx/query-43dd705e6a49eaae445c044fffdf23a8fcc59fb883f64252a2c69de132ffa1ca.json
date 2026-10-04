@@ -1,0 +1,15 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "UPDATE jornada_diaria\n                     SET minutos_trabajados = minutos_trabajados + GREATEST(0, ROUND(EXTRACT(EPOCH FROM (LOCALTIMESTAMP - $1::timestamp)) / 60)::INTEGER),\n                         ultima_actualizacion = CURRENT_TIMESTAMP\n                     WHERE empleado_cedula = $2 AND fecha = CURRENT_DATE",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Timestamp",
+        "Int4"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "43dd705e6a49eaae445c044fffdf23a8fcc59fb883f64252a2c69de132ffa1ca"
+}

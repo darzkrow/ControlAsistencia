@@ -1,0 +1,96 @@
+services:
+  # ============================================================================
+  # 1. Base de Datos PostgreSQL
+  # ============================================================================
+  db:
+    image: postgres:16-alpine
+    container_name: rapture-db
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-api_db}
+      POSTGRES_USER: ${POSTGRES_USER:-admin}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-secreto}
+    ports:
+      - "5432:5432"
+    volumes:
+      # Persistencia de datos en volumen administrado
+      - postgres_data:/var/lib/postgresql/data
+      # Inicialización automática con el DDL corregido y datos iniciales
+      - ./respaldo_rapture.sql:/docker-entrypoint-initdb.d/01_init.sql:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U admin -d api_db"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+    networks:
+      - rapture-network
+    deploy:
+      resources:
+        limits:
+          cpus: '1.0'
+          memory: 512M
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+  # ============================================================================
+  # 2. Backend Biométrico Rapture (Rust Axum + OpenCV)
+  # ============================================================================
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: rapture-backend
+    restart: unless-stopped
+    depends_on:
+      db:
+        condition: service_healthy
+    ports:
+      - "3000:3000"
+    environment:
+      DATABASE_URL: postgres://${POSTGRES_USER:-admin}:${POSTGRES_PASSWORD:-secreto}@db:5432/${POSTGRES_DB:-api_db}
+      SERVER_HOST: 0.0.0.0
+      SERVER_PORT: 3000
+      COOLDOWN_SECONDS: 15
+      MAX_BODY_LIMIT_MB: 15
+      RUST_LOG: info
+    volumes:
+      # Volumen persistente para almacenamiento seguro de capturas
+      - uploads_data:/app/uploads/fotos
+    # POLÍTICAS DE SEGURIDAD
+    security_opt:
+      - "no-new-privileges:true"
+    cap_drop:
+      - ALL
+    # POLÍTICAS DE GOBERNANZA DE RECURSOS
+    deploy:
+      resources:
+        limits:
+          cpus: '2.0'
+          memory: 1024M
+        reservations:
+          memory: 256M
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
+    networks:
+      - rapture-network
+
+# ==============================================================================
+# Redes y Volúmenes Persistentes
+# ==============================================================================
+networks:
+  rapture-network:
+    driver: bridge
+    name: rapture-network
+
+volumes:
+  postgres_data:
+    name: rapture_postgres_data
+  uploads_data:
+    name: rapture_uploads_data

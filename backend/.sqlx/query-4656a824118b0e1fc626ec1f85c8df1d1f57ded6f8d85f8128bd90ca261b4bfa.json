@@ -1,0 +1,28 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT tipo_evento, fecha_hora FROM eventos_lector WHERE empleado_cedula = $1 ORDER BY id DESC LIMIT 1",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "tipo_evento",
+        "type_info": "Varchar"
+      },
+      {
+        "ordinal": 1,
+        "name": "fecha_hora",
+        "type_info": "Timestamp"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Int4"
+      ]
+    },
+    "nullable": [
+      true,
+      true
+    ]
+  },
+  "hash": "4656a824118b0e1fc626ec1f85c8df1d1f57ded6f8d85f8128bd90ca261b4bfa"
+}

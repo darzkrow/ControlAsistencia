@@ -1,0 +1,16 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "INSERT INTO eventos_lector (empleado_cedula, tipo_evento, foto_path) VALUES ($1, $2, $3)",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Int4",
+        "Varchar",
+        "Varchar"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "5a580c3c3d84a4db06f5f791b9007965742995488d8d87f93c79c70df8c91674"
+}

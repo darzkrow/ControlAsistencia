@@ -1,0 +1,34 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT cedula, nombre_completo, departamento FROM empleados WHERE cedula = $1",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "cedula",
+        "type_info": "Int4"
+      },
+      {
+        "ordinal": 1,
+        "name": "nombre_completo",
+        "type_info": "Varchar"
+      },
+      {
+        "ordinal": 2,
+        "name": "departamento",
+        "type_info": "Varchar"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Int4"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      false
+    ]
+  },
+  "hash": "253de35930fcc6c0dcdcea027f7c43db78088d6696fb0d904fcb3884578e2148"
+}

@@ -1,0 +1,8 @@
+target/
+.git/
+.env
+.env.*
+uploads/fotos/*.jpg
+*.tmp
+*.log
+.sqlx/
