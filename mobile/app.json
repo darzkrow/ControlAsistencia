@@ -1,0 +1,43 @@
+{
+  "expo": {
+    "name": "Rapture Biometrics Mobile & Tablet",
+    "slug": "rapture-biometrics-mobile",
+    "version": "1.0.0",
+    "orientation": "default",
+    "icon": "./assets/icon.png",
+    "userInterfaceStyle": "dark",
+    "splash": {
+      "image": "./assets/splash.png",
+      "resizeMode": "contain",
+      "backgroundColor": "#0b0f19"
+    },
+    "ios": {
+      "supportsTablet": true,
+      "bundleIdentifier": "com.rapture.biometrics.mobile",
+      "infoPlist": {
+        "NSCameraUsageDescription": "Esta aplicacion requiere acceso a la camara para registrar la fotografia de verificacion facial en cada marcacion de asistencia.",
+        "NSLocationWhenInUseUsageDescription": "Esta aplicacion requiere acceso a la ubicacion GPS para validar que la marcacion se efectue dentro del perimetro de la sede autorizada.",
+        "NSFaceIDUsageDescription": "Esta aplicacion utiliza biometria para autenticar de forma segura la identidad del colaborador."
+      }
+    },
+    "android": {
+      "package": "com.rapture.biometrics.mobile",
+      "adaptiveIcon": {
+        "foregroundImage": "./assets/adaptive-icon.png",
+        "backgroundColor": "#0b0f19"
+      },
+      "permissions": [
+        "CAMERA",
+        "ACCESS_FINE_LOCATION",
+        "ACCESS_COARSE_LOCATION",
+        "USE_BIOMETRIC",
+        "USE_FINGERPRINT",
+        "INTERNET",
+        "ACCESS_NETWORK_STATE"
+      ]
+    },
+    "web": {
+      "favicon": "./assets/favicon.png"
+    }
+  }
+}

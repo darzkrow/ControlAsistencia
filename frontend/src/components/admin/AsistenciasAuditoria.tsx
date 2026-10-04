@@ -29,6 +29,7 @@ export const AsistenciasAuditoria: React.FC = () => {
   const [fechaHasta, setFechaHasta] = useState<string>('');
   const [filtroSede, setFiltroSede] = useState<number | undefined>(undefined);
   const [filtroDepto, setFiltroDepto] = useState<number | undefined>(undefined);
+  const [filtroSoloFraude, setFiltroSoloFraude] = useState<boolean>(false);
 
   const loadData = async () => {
     setLoading(true);
@@ -49,7 +50,7 @@ export const AsistenciasAuditoria: React.FC = () => {
 
   const exportCSV = () => {
     if (reportes.length === 0) return;
-    const headers = ['Fecha', 'Cedula', 'Colaborador', 'Sede', 'Departamento', 'Cargo', 'Hora Entrada', 'Hora Salida', 'Minutos Trabajados', 'Puntualidad', 'Minutos Retardo'];
+    const headers = ['Fecha', 'Cedula', 'Colaborador', 'Sede', 'Departamento', 'Cargo', 'Hora Entrada', 'Hora Salida', 'Minutos Trabajados', 'Puntualidad', 'Minutos Retardo', 'Geovalla GPS', 'Distancia Metros'];
     const rows = reportes.map((r) => [
       r.fecha,
       r.empleado_cedula,
@@ -62,6 +63,8 @@ export const AsistenciasAuditoria: React.FC = () => {
       r.minutos_trabajados,
       r.puntualidad || '',
       r.minutos_retardo,
+      r.alerta_fraude_rrhh || r.fuera_de_sede_entrada ? 'ALERTA_FUERA_DE_SEDE' : 'DENTRO_DE_SEDE',
+      r.distancia_sede_entrada || 0,
     ]);
 
     const csvContent = 'data:text/csv;charset=utf-8,' + [headers.join(','), ...rows.map((e) => e.join(','))].join('\n');
@@ -76,6 +79,11 @@ export const AsistenciasAuditoria: React.FC = () => {
 
   const totalPuntuales = reportes.filter((r) => r.puntualidad === 'Puntual').length;
   const totalRetardos = reportes.filter((r) => r.puntualidad === 'Retardo').length;
+  const totalAlertasFraude = reportes.filter((r) => r.alerta_fraude_rrhh || r.fuera_de_sede_entrada).length;
+
+  const reportesVisibles = filtroSoloFraude
+    ? reportes.filter((r) => r.alerta_fraude_rrhh || r.fuera_de_sede_entrada)
+    : reportes;
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: '20px' }}>
@@ -84,7 +92,7 @@ export const AsistenciasAuditoria: React.FC = () => {
         <div>
           <h2 style={{ fontSize: '1.4rem', fontWeight: 800 }}>Auditoría y Evaluación de Asistencia</h2>
           <p style={{ fontSize: '0.85rem', color: 'var(--text-muted)' }}>
-            Supervisión de jornadas, puntualidad contra horarios y control de horas laboradas.
+            Supervisión de jornadas, puntualidad contra horarios y control de geovallas GPS anti-fraude.
           </p>
         </div>
 
@@ -121,6 +129,10 @@ export const AsistenciasAuditoria: React.FC = () => {
         <div style={{ padding: '10px 16px', borderRadius: 'var(--radius-sm)', background: 'rgba(255, 183, 3, 0.1)', border: '1px solid rgba(255, 183, 3, 0.3)', color: 'var(--accent-amber)', fontSize: '0.8rem', display: 'flex', alignItems: 'center', gap: '8px' }}>
           <AlertTriangle size={16} />
           <span>Retardos Identificados: <strong>{totalRetardos}</strong></span>
+        </div>
+        <div style={{ padding: '10px 16px', borderRadius: 'var(--radius-sm)', background: 'rgba(239, 68, 68, 0.1)', border: '1px solid rgba(239, 68, 68, 0.35)', color: '#ef4444', fontSize: '0.8rem', display: 'flex', alignItems: 'center', gap: '8px' }}>
+          <AlertTriangle size={16} />
+          <span>Alertas Fuera de Sede (GPS): <strong>{totalAlertasFraude}</strong></span>
         </div>
       </div>
 
@@ -206,6 +218,28 @@ export const AsistenciasAuditoria: React.FC = () => {
             <option key={d.id} value={d.id}>{d.nombre}</option>
           ))}
         </select>
+
+        {/* Boton para filtrar solo alertas de fraude fuera de sede */}
+        <button
+          onClick={() => setFiltroSoloFraude(!filtroSoloFraude)}
+          style={{
+            display: 'flex',
+            alignItems: 'center',
+            gap: '6px',
+            padding: '8px 14px',
+            borderRadius: 'var(--radius-sm)',
+            background: filtroSoloFraude ? 'rgba(239, 68, 68, 0.2)' : 'rgba(255, 255, 255, 0.05)',
+            border: filtroSoloFraude ? '1px solid rgba(239, 68, 68, 0.5)' : '1px solid var(--border-subtle)',
+            color: filtroSoloFraude ? '#ef4444' : 'var(--text-secondary)',
+            fontSize: '0.8rem',
+            fontWeight: 700,
+            cursor: 'pointer',
+            marginLeft: 'auto',
+          }}
+        >
+          <AlertTriangle size={14} />
+          {filtroSoloFraude ? 'Mostrando: Solo Alertas Fuera de Sede' : 'Filtrar Alertas Fuera de Sede'}
+        </button>
       </div>
 
       {/* Report Table */}
@@ -220,25 +254,26 @@ export const AsistenciasAuditoria: React.FC = () => {
               <th style={{ padding: '12px' }}>SALIDA</th>
               <th style={{ padding: '12px' }}>TIEMPO TRABAJADO</th>
               <th style={{ padding: '12px' }}>EVALUACIÓN PUNTUALIDAD</th>
+              <th style={{ padding: '12px' }}>GEOVALLA GPS / AUDITORIA</th>
               <th style={{ padding: '12px', textAlign: 'center' }}>EVIDENCIA</th>
             </tr>
           </thead>
           <tbody>
             {loading ? (
               <tr>
-                <td colSpan={8} style={{ padding: '32px', textAlign: 'center', color: 'var(--text-muted)' }}>
+                <td colSpan={9} style={{ padding: '32px', textAlign: 'center', color: 'var(--text-muted)' }}>
                   <RefreshCw size={18} style={{ display: 'inline-block', marginRight: '8px', verticalAlign: 'middle' }} />
                   Cargando registros de auditoría...
                 </td>
               </tr>
-            ) : reportes.length === 0 ? (
+            ) : reportesVisibles.length === 0 ? (
               <tr>
-                <td colSpan={8} style={{ padding: '32px', textAlign: 'center', color: 'var(--text-muted)' }}>
+                <td colSpan={9} style={{ padding: '32px', textAlign: 'center', color: 'var(--text-muted)' }}>
                   No se encontraron registros de asistencia para los filtros seleccionados.
                 </td>
               </tr>
             ) : (
-              reportes.map((r, i) => {
+              reportesVisibles.map((r, i) => {
                 const isPuntual = r.puntualidad === 'Puntual';
                 const isRetardo = r.puntualidad === 'Retardo';
                 const badgeColor = isPuntual
@@ -248,6 +283,7 @@ export const AsistenciasAuditoria: React.FC = () => {
                   : 'var(--accent-cyan)';
 
                 const formatTime = (ts?: string) => formatTimeTo12h(ts, true);
+                const isFueraDeSede = r.alerta_fraude_rrhh || r.fuera_de_sede_entrada;
 
                 return (
                   <tr key={`${r.empleado_cedula}-${r.fecha}-${i}`} style={{ borderBottom: '1px solid var(--border-subtle)' }}>
@@ -296,6 +332,67 @@ export const AsistenciasAuditoria: React.FC = () => {
                         {r.puntualidad}
                         {isRetardo && r.minutos_retardo > 0 && ` (+${r.minutos_retardo}m)`}
                       </span>
+                    </td>
+                    <td style={{ padding: '12px' }}>
+                      {isFueraDeSede ? (
+                        <div>
+                          <span
+                            style={{
+                              display: 'inline-flex',
+                              alignItems: 'center',
+                              gap: '4px',
+                              padding: '3px 10px',
+                              borderRadius: '999px',
+                              background: 'rgba(239, 68, 68, 0.15)',
+                              color: '#ef4444',
+                              border: '1px solid rgba(239, 68, 68, 0.4)',
+                              fontSize: '0.72rem',
+                              fontWeight: 700,
+                            }}
+                          >
+                            <AlertTriangle size={12} />
+                            ALERTA: FUERA DE SEDE ({r.distancia_sede_entrada || 0}m)
+                          </span>
+                          {r.latitud_entrada && r.longitud_entrada && (
+                            <a
+                              href={`https://www.google.com/maps?q=${r.latitud_entrada},${r.longitud_entrada}`}
+                              target="_blank"
+                              rel="noreferrer"
+                              style={{
+                                display: 'block',
+                                fontSize: '0.7rem',
+                                color: 'var(--accent-cyan)',
+                                marginTop: '4px',
+                                textDecoration: 'none',
+                              }}
+                            >
+                              Ver Mapa GPS ({Number(r.latitud_entrada).toFixed(4)}, {Number(r.longitud_entrada).toFixed(4)})
+                            </a>
+                          )}
+                        </div>
+                      ) : r.distancia_sede_entrada !== undefined && r.distancia_sede_entrada !== null ? (
+                        <span
+                          style={{
+                            display: 'inline-flex',
+                            alignItems: 'center',
+                            gap: '4px',
+                            padding: '3px 10px',
+                            borderRadius: '999px',
+                            background: 'rgba(16, 185, 129, 0.12)',
+                            color: 'var(--accent-emerald)',
+                            border: '1px solid rgba(16, 185, 129, 0.3)',
+                            fontSize: '0.72rem',
+                            fontWeight: 600,
+                          }}
+                        >
+                          <CheckCircle2 size={12} />
+                          EN SEDE ({r.distancia_sede_entrada}m)
+                        </span>
+                      ) : (
+                        <span style={{ fontSize: '0.72rem', color: 'var(--text-muted)' }}>
+                          TERMINAL LOCAL
+                        </span>
+                      )}
                     </td>
                     <td style={{ padding: '12px', textAlign: 'center' }}>
                       <span

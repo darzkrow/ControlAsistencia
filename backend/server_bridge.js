@@ -268,6 +268,44 @@ async function logAuditoria(client, usuarioId, email, accion, modulo, detalles, 
   }
 }
 
+// Calculo de distancia geodesica usando la formula de Haversine (en metros)
+function calcularDistanciaHaversine(lat1, lon1, lat2, lon2) {
+  const p1 = Number(lat1);
+  const l1 = Number(lon1);
+  const p2 = Number(lat2);
+  const l2 = Number(lon2);
+  if (isNaN(p1) || isNaN(l1) || isNaN(p2) || isNaN(l2)) return 0;
+
+  const R = 6371000; // Radio de la Tierra en metros
+  const radLat1 = (p1 * Math.PI) / 180;
+  const radLat2 = (p2 * Math.PI) / 180;
+  const deltaLat = ((p2 - p1) * Math.PI) / 180;
+  const deltaLon = ((l2 - l1) * Math.PI) / 180;
+
+  const a =
+    Math.sin(deltaLat / 2) * Math.sin(deltaLat / 2) +
+    Math.cos(radLat1) * Math.cos(radLat2) *
+    Math.sin(deltaLon / 2) * Math.sin(deltaLon / 2);
+  const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+
+  return Math.round(R * c);
+}
+
+// Formato de hora en 12 horas (AM/PM) respetando la zona horaria oficial
+function formatLocalTime12h(date = new Date()) {
+  try {
+    return new Intl.DateTimeFormat('es-VE', {
+      timeZone: TIMEZONE,
+      hour: '2-digit',
+      minute: '2-digit',
+      second: '2-digit',
+      hour12: true,
+    }).format(date);
+  } catch {
+    return date.toLocaleTimeString('en-US', { hour12: true });
+  }
+}
+
 const server = http.createServer(async (req, res) => {
   // CORS Preflight
   if (req.method === 'OPTIONS') {
@@ -434,6 +472,259 @@ const server = http.createServer(async (req, res) => {
         departamento: emp.departamento || 'General',
         tipo_evento: tipoEvento,
         minutos_acumulados: 0,
+      });
+    }
+
+    // --------------------------------------------------------------------------
+    // 2.1 ASISTENCIA MOVIL / TABLET - GEOLOCALIZACION Y GEOVALLAS RRHH
+    // --------------------------------------------------------------------------
+    if (route === '/asistencia/movil' && req.method === 'POST') {
+      const b = await parseBody(req);
+      const cedula = Number(b.cedula);
+      if (!cedula || isNaN(cedula)) {
+        return sendJson(res, 400, { exito: false, mensaje: 'Numero de cedula invalido' });
+      }
+
+      // 1. Obtener o validar colaborador
+      const empRes = await pool.query(
+        `SELECT e.*, s.id as sede_real_id, s.nombre as sede_nombre, s.latitud as sede_lat, s.longitud as sede_lon, s.radio_tolerancia_metros
+         FROM empleados e
+         LEFT JOIN sedes s ON e.sede_id = s.id
+         WHERE e.cedula = $1`,
+        [cedula]
+      );
+      if (empRes.rows.length === 0 || !empRes.rows[0].activo) {
+        return sendJson(res, 404, {
+          exito: false,
+          es_empleado: false,
+          mensaje: 'Colaborador no encontrado o inactivo en el sistema.'
+        });
+      }
+      const emp = empRes.rows[0];
+
+      // 2. Determinar la Sede de Referencia (si viene sede_id o la del empleado o la central)
+      let sedeRef = null;
+      if (b.sede_id) {
+        const sRes = await pool.query('SELECT * FROM sedes WHERE id = $1', [Number(b.sede_id)]);
+        if (sRes.rows.length > 0) sedeRef = sRes.rows[0];
+      }
+      if (!sedeRef && emp.sede_real_id) {
+        sedeRef = {
+          id: emp.sede_real_id,
+          nombre: emp.sede_nombre,
+          latitud: emp.sede_lat,
+          longitud: emp.sede_lon,
+          radio_tolerancia_metros: emp.radio_tolerancia_metros || 150
+        };
+      }
+      if (!sedeRef) {
+        const defaultSede = await pool.query('SELECT * FROM sedes WHERE activa = true ORDER BY id ASC LIMIT 1');
+        sedeRef = defaultSede.rows[0] || {
+          id: 1,
+          nombre: 'Sede Principal',
+          latitud: 10.4910,
+          longitud: -66.8780,
+          radio_tolerancia_metros: 150
+        };
+      }
+
+      // 3. Validar Coordenadas GPS del Dispositivo
+      const latDispositivo = Number(b.latitud);
+      const lonDispositivo = Number(b.longitud);
+      const precisionGps = Number(b.precision_gps) || 0;
+      const metodoAuth = b.metodo_auth || (b.template_huella ? 'HUELLA' : 'FACIAL');
+      const tipoEvento = (b.tipo_evento || 'ENTRADA').toUpperCase();
+      const origenDispositivo = b.dispositivo_info ? `MOVIL (${b.dispositivo_info})` : 'APP_MOVIL_TABLET';
+
+      let distanciaMetros = 0;
+      let fueraDeSede = false;
+      let alertaFraude = false;
+      let notasAuditoria = null;
+
+      const radioPermitido = Number(sedeRef.radio_tolerancia_metros) || 150;
+
+      if (!isNaN(latDispositivo) && !isNaN(lonDispositivo) && latDispositivo !== 0) {
+        distanciaMetros = calcularDistanciaHaversine(
+          latDispositivo,
+          lonDispositivo,
+          Number(sedeRef.latitud),
+          Number(sedeRef.longitud)
+        );
+
+        if (distanciaMetros > radioPermitido) {
+          fueraDeSede = true;
+          alertaFraude = true;
+          notasAuditoria = `Marcacion capturada fuera de perimetro (${distanciaMetros}m de sede '${sedeRef.nombre}', tolerancia ${radioPermitido}m). Marcacion registrada para evaluacion de fraude por RRHH.`;
+        } else {
+          notasAuditoria = `Marcacion validada dentro de perimetro (${distanciaMetros}m de sede '${sedeRef.nombre}').`;
+        }
+      } else {
+        // Dispositivo sin GPS o con GPS desactivado
+        fueraDeSede = true;
+        alertaFraude = true;
+        notasAuditoria = 'Marcacion sin coordenadas GPS validas. Marcacion registrada para auditoria obligatoria de RRHH.';
+      }
+
+      // 4. Registrar evento en eventos_lector (con foto y georreferencia)
+      const fotoPath = b.foto_base64 ? `movil_captura_${cedula}_${Date.now()}.jpg` : null;
+      const insertEvt = await pool.query(
+        `INSERT INTO eventos_lector 
+         (empleado_cedula, fecha_hora, tipo_evento, metodo_auth, foto_path, latitud, longitud, precision_gps, fuera_de_sede, distancia_metros, sede_id, origen_dispositivo, alerta_fraude_rrhh, notas_auditoria)
+         VALUES ($1, NOW(), $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)
+         RETURNING *`,
+        [
+          cedula,
+          tipoEvento,
+          metodoAuth,
+          fotoPath,
+          latDispositivo || null,
+          lonDispositivo || null,
+          precisionGps,
+          fueraDeSede,
+          distanciaMetros,
+          sedeRef.id,
+          origenDispositivo,
+          alertaFraude,
+          notasAuditoria
+        ]
+      );
+
+      // 5. Actualizar Jornada Diaria
+      const jCheck = await pool.query(
+        'SELECT * FROM jornada_diaria WHERE empleado_cedula = $1 AND fecha = CURRENT_DATE',
+        [cedula]
+      );
+
+      if (jCheck.rows.length === 0) {
+        // Primera marcacion: Entrada
+        await pool.query(
+          `INSERT INTO jornada_diaria 
+           (empleado_cedula, fecha, hora_entrada, estado, minutos_trabajados, fuera_de_sede_entrada, distancia_sede_entrada, latitud_entrada, longitud_entrada, alerta_fraude_rrhh, dispositivo_movil_info, ultima_actualizacion)
+           VALUES ($1, CURRENT_DATE, NOW(), 'En curso', 0, $2, $3, $4, $5, $6, $7, NOW())`,
+          [
+            cedula,
+            fueraDeSede,
+            distanciaMetros,
+            latDispositivo || null,
+            lonDispositivo || null,
+            alertaFraude,
+            origenDispositivo
+          ]
+        );
+      } else {
+        // Marcacion subsiguiente: Salida
+        await pool.query(
+          `UPDATE jornada_diaria 
+           SET hora_salida = NOW(),
+               estado = 'Completada',
+               fuera_de_sede_salida = $2,
+               distancia_sede_salida = $3,
+               latitud_salida = $4,
+               longitud_salida = $5,
+               alerta_fraude_rrhh = (alerta_fraude_rrhh OR $6),
+               dispositivo_movil_info = $7,
+               minutos_trabajados = GREATEST(0, ROUND(EXTRACT(EPOCH FROM (NOW() - hora_entrada)) / 60))::int,
+               ultima_actualizacion = NOW()
+           WHERE empleado_cedula = $1 AND fecha = CURRENT_DATE`,
+          [
+            cedula,
+            fueraDeSede,
+            distanciaMetros,
+            latDispositivo || null,
+            lonDispositivo || null,
+            alertaFraude,
+            origenDispositivo
+          ]
+        );
+      }
+
+      // Si hubo alerta de fraude, registrar en auditoria de seguridad
+      if (alertaFraude) {
+        await logAuditoria(
+          null,
+          cedula,
+          emp.email || `${cedula}@rapture.local`,
+          'MARCACION_MOVIL_FUERA_DE_SEDE',
+          'CONTROL_ASISTENCIA_GPS',
+          `Colaborador ${emp.nombre_completo} marco a ${distanciaMetros}m de sede '${sedeRef.nombre}'. Tolerancia: ${radioPermitido}m. Coordenadas: (${latDispositivo}, ${lonDispositivo})`,
+          clientIp
+        );
+      }
+
+      const hora12h = formatLocalTime12h(new Date());
+
+      return sendJson(res, 200, {
+        exito: true,
+        evento_id: insertEvt.rows[0].id,
+        cedula: emp.cedula,
+        nombre_completo: emp.nombre_completo,
+        departamento: emp.departamento,
+        tipo_evento: tipoEvento,
+        metodo_auth: metodoAuth,
+        fuera_de_sede: fueraDeSede,
+        distancia_metros: distanciaMetros,
+        radio_tolerancia_metros: radioPermitido,
+        alerta_fraude_rrhh: alertaFraude,
+        sede_nombre: sedeRef.nombre,
+        hora_12h: hora12h,
+        mensaje: fueraDeSede
+          ? `Marcacion registrada con ALERTA: Fuera de sede (${distanciaMetros}m > ${radioPermitido}m). Marcada para revision de RRHH.`
+          : `Marcacion registrada exitosamente en perimetro de sede (${distanciaMetros}m).`
+      });
+    }
+
+    // --------------------------------------------------------------------------
+    // 2.2 CONSULTA DE GEOCERCAS Y SEDES ACTIVAS (PARA APP MOVIL / TABLET)
+    // --------------------------------------------------------------------------
+    if (route === '/sedes/geocercas' && req.method === 'GET') {
+      const result = await pool.query(
+        `SELECT id, codigo, nombre, direccion, ciudad, latitud, longitud, radio_tolerancia_metros
+         FROM sedes
+         WHERE activa = true
+         ORDER BY id ASC`
+      );
+      return sendJson(res, 200, result.rows);
+    }
+
+    // --------------------------------------------------------------------------
+    // 2.3 GESTION Y AUDITORIA DE ALERTAS DE FRAUDE POR RRHH
+    // --------------------------------------------------------------------------
+    if (route === '/asistencia/alertas-fraude' && req.method === 'GET') {
+      const result = await pool.query(
+        `SELECT el.id, el.empleado_cedula, e.nombre_completo, e.departamento,
+                s.nombre as sede_nombre, s.radio_tolerancia_metros,
+                el.fecha_hora::text, el.tipo_evento, el.metodo_auth, el.foto_path,
+                el.latitud, el.longitud, el.precision_gps, el.distancia_metros,
+                el.fuera_de_sede, el.alerta_fraude_rrhh, el.estado_auditoria_rrhh,
+                el.notas_auditoria, el.origen_dispositivo
+         FROM eventos_lector el
+         JOIN empleados e ON el.empleado_cedula = e.cedula
+         LEFT JOIN sedes s ON el.sede_id = s.id
+         WHERE el.alerta_fraude_rrhh = true OR el.fuera_de_sede = true
+         ORDER BY el.fecha_hora DESC
+         LIMIT 100`
+      );
+      return sendJson(res, 200, result.rows);
+    }
+
+    const matchAuditarFraude = route.match(/^\/asistencia\/alertas-fraude\/(\d+)\/auditar$/);
+    if (matchAuditarFraude && req.method === 'PUT') {
+      const idEvt = Number(matchAuditarFraude[1]);
+      const b = await parseBody(req);
+      const nuevoEstado = b.estado_auditoria || 'JUSTIFICADA';
+      const notas = b.notas || 'Revision completada por departamento de RRHH.';
+
+      const updated = await pool.query(
+        `UPDATE eventos_lector 
+         SET estado_auditoria_rrhh = $1, notas_auditoria = $2
+         WHERE id = $3 RETURNING *`,
+        [nuevoEstado, notas, idEvt]
+      );
+
+      return sendJson(res, 200, {
+        exito: true,
+        mensaje: `Alerta #${idEvt} actualizada a estado '${nuevoEstado}'.`,
+        evento: updated.rows[0]
       });
     }
 
@@ -759,10 +1050,15 @@ const server = http.createServer(async (req, res) => {
       const result = await pool.query(
         `SELECT j.empleado_cedula, e.nombre_completo,
                 COALESCE(s.nombre, 'Sede Central') as nombre_sede,
+                COALESCE(s.radio_tolerancia_metros, 150) as radio_tolerancia_metros,
                 COALESCE(d.nombre, e.departamento) as nombre_departamento,
                 COALESCE(c.nombre, 'Colaborador') as nombre_cargo,
                 j.fecha::text, j.hora_entrada::text, j.hora_salida::text,
                 j.estado, j.minutos_trabajados,
+                j.fuera_de_sede_entrada, j.distancia_sede_entrada,
+                j.fuera_de_sede_salida, j.distancia_sede_salida,
+                j.latitud_entrada, j.longitud_entrada,
+                j.alerta_fraude_rrhh, j.dispositivo_movil_info,
                 CASE WHEN j.hora_entrada::time > (COALESCE(t.hora_entrada, '08:00:00'::time) + (COALESCE(t.tolerancia_minutos, 15) || ' minutes')::interval)
                      THEN 'Retardo' ELSE 'Puntual' END as puntualidad,
                 GREATEST(0, ROUND(EXTRACT(EPOCH FROM (j.hora_entrada::time - COALESCE(t.hora_entrada, '08:00:00'::time))) / 60))::int as minutos_retardo
