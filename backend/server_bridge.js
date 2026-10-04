@@ -4,6 +4,7 @@ const http = require('node:http');
 const crypto = require('node:crypto');
 const { Pool } = require('pg');
 const Redis = require('ioredis');
+const { createBiometricAdapter, testTcpConnectivity } = require('./drivers/biometric_adapters');
 
 // Carga automatica de variables de entorno desde .env si existe en el root
 const envPath = path.resolve(__dirname, '../.env');
@@ -900,6 +901,188 @@ const server = http.createServer(async (req, res) => {
          LIMIT 100`
       );
       return sendJson(res, 200, result.rows);
+    }
+
+    // --------------------------------------------------------------------------
+    // 17. DISPOSITIVOS BIOMETRICOS Y CONTROL DE ACCESO IP (MULTI-MARCA)
+    // --------------------------------------------------------------------------
+    if (route === '/admin/dispositivos') {
+      if (req.method === 'GET') {
+        const result = await pool.query(
+          `SELECT d.*, COALESCE(s.nombre, 'Sin Sede Asignada') as nombre_sede
+           FROM dispositivos_biometricos d
+           LEFT JOIN sedes s ON d.sede_id = s.id
+           ORDER BY d.id ASC`
+        );
+        return sendJson(res, 200, result.rows);
+      }
+      if (req.method === 'POST') {
+        const b = await parseBody(req);
+        if (!b.nombre || !b.direccion_ip) {
+          return sendJson(res, 400, { error: 'Nombre y direccion IP son campos obligatorios.' });
+        }
+        const result = await pool.query(
+          `INSERT INTO dispositivos_biometricos 
+           (nombre, marca, modelo, direccion_ip, puerto, protocolo, clave_comunicacion, numero_serie, sede_id, tipo_acceso, activo)
+           VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, true)
+           RETURNING *`,
+          [
+            b.nombre,
+            b.marca || 'ZKTeco',
+            b.modelo || 'Terminal Biometrico IP',
+            b.direccion_ip.trim(),
+            Number(b.puerto) || 4370,
+            b.protocolo || 'ZK_TCP',
+            b.clave_comunicacion || '0',
+            b.numero_serie || `DEV-${Date.now()}`,
+            b.sede_id || null,
+            b.tipo_acceso || 'ambos'
+          ]
+        );
+        await logAuditoria(null, null, 'SuperAdmin', 'CREAR_DISPOSITIVO', 'DISPOSITIVOS', `Registrado dispositivo biometrico IP ${b.direccion_ip} (${b.nombre})`, clientIp);
+        return sendJson(res, 201, result.rows[0]);
+      }
+    }
+
+    const matchDevUpdate = route.match(/^\/admin\/dispositivos\/(\d+)$/);
+    if (matchDevUpdate) {
+      const devId = Number(matchDevUpdate[1]);
+      if (req.method === 'PUT') {
+        const b = await parseBody(req);
+        const result = await pool.query(
+          `UPDATE dispositivos_biometricos
+           SET nombre = $1, marca = $2, modelo = $3, direccion_ip = $4, puerto = $5,
+               protocolo = $6, clave_comunicacion = $7, numero_serie = $8, sede_id = $9,
+               tipo_acceso = $10, activo = $11
+           WHERE id = $12 RETURNING *`,
+          [
+            b.nombre, b.marca, b.modelo, b.direccion_ip.trim(), Number(b.puerto) || 4370,
+            b.protocolo, b.clave_comunicacion, b.numero_serie, b.sede_id || null,
+            b.tipo_acceso || 'ambos', b.activo !== false, devId
+          ]
+        );
+        return sendJson(res, 200, result.rows[0] || { ok: true });
+      }
+      if (req.method === 'DELETE') {
+        await pool.query('DELETE FROM dispositivos_biometricos WHERE id = $1', [devId]);
+        await logAuditoria(null, null, 'SuperAdmin', 'ELIMINAR_DISPOSITIVO', 'DISPOSITIVOS', `Eliminado dispositivo biometrico ID ${devId}`, clientIp);
+        return sendJson(res, 200, { ok: true });
+      }
+    }
+
+    // Ping / Diagnostico de Red a Dispositivo Biometrico IP
+    const matchDevPing = route.match(/^\/admin\/dispositivos\/(\d+)\/ping$/);
+    if (matchDevPing && req.method === 'POST') {
+      const devId = Number(matchDevPing[1]);
+      const devRes = await pool.query('SELECT * FROM dispositivos_biometricos WHERE id = $1', [devId]);
+      if (devRes.rows.length === 0) {
+        return sendJson(res, 404, { error: 'Dispositivo no encontrado.' });
+      }
+      const dev = devRes.rows[0];
+      const adapter = createBiometricAdapter(dev);
+      const pingResult = await adapter.ping();
+
+      const estadoConexion = pingResult.exito ? 'en_linea' : 'desconectado';
+      await pool.query(
+        'UPDATE dispositivos_biometricos SET estado_conexion = $1, ultimo_ping = NOW(), latencia_ms = $2 WHERE id = $3',
+        [estadoConexion, pingResult.latenciaMs || 0, devId]
+      );
+
+      return sendJson(res, 200, {
+        ok: true,
+        online: pingResult.exito,
+        latencia_ms: pingResult.latenciaMs || 0,
+        mensaje: pingResult.mensaje,
+      });
+    }
+
+    // Sincronizacion manual de registros de asistencia desde la memoria del terminal
+    const matchDevSync = route.match(/^\/admin\/dispositivos\/(\d+)\/sincronizar$/);
+    if (matchDevSync && req.method === 'POST') {
+      const devId = Number(matchDevSync[1]);
+      const devRes = await pool.query('SELECT * FROM dispositivos_biometricos WHERE id = $1', [devId]);
+      if (devRes.rows.length === 0) {
+        return sendJson(res, 404, { error: 'Dispositivo no encontrado.' });
+      }
+      const dev = devRes.rows[0];
+      const adapter = createBiometricAdapter(dev);
+
+      const empRes = await pool.query('SELECT cedula FROM empleados WHERE activo = true LIMIT 500');
+      const cedulas = empRes.rows.map(r => r.cedula);
+
+      const syncResult = await adapter.descargarMarcaciones(cedulas);
+      let count = 0;
+      if (syncResult.registros && syncResult.registros.length > 0) {
+        for (const r of syncResult.registros) {
+          punchQueue.push({
+            empleado_cedula: r.empleado_cedula,
+            fecha_hora: r.fecha_hora || new Date().toISOString(),
+            tipo_evento: r.tipo_evento || 'ENTRADA',
+            metodo_auth: r.metodo_auth || 'HUELLA',
+          });
+          count++;
+        }
+        // Disparar procesamiento de lote inmediatamente
+        setImmediate(flushPunchBatch);
+      }
+
+      await pool.query(
+        'UPDATE dispositivos_biometricos SET ultima_sincronizacion = NOW(), total_marcaciones_sincronizadas = total_marcaciones_sincronizadas + $1 WHERE id = $2',
+        [count, devId]
+      );
+
+      await logAuditoria(null, null, 'SuperAdmin', 'SINCRONIZAR_DISPOSITIVO', 'DISPOSITIVOS', `Sincronizadas ${count} marcaciones desde dispositivo ${dev.nombre} (${dev.direccion_ip})`, clientIp);
+
+      return sendJson(res, 200, {
+        ok: true,
+        marcaciones_ingeridas: count,
+        origen: syncResult.origen,
+        mensaje: syncResult.mensaje,
+      });
+    }
+
+    // Utilizar dispositivo biometrico IP como Captahuellas remoto para enrolamiento de un empleado
+    const matchDevEnrol = route.match(/^\/admin\/dispositivos\/(\d+)\/enrolar-captura$/);
+    if (matchDevEnrol && req.method === 'POST') {
+      const devId = Number(matchDevEnrol[1]);
+      const { cedula, forzar_simulacion } = await parseBody(req);
+      if (!cedula) {
+        return sendJson(res, 400, { error: 'Cedula de colaborador requerida para enrolamiento.' });
+      }
+      const devRes = await pool.query('SELECT * FROM dispositivos_biometricos WHERE id = $1', [devId]);
+      if (devRes.rows.length === 0) {
+        return sendJson(res, 404, { error: 'Dispositivo no encontrado.' });
+      }
+      const dev = devRes.rows[0];
+      const adapter = createBiometricAdapter(dev);
+      const enrolRes = await adapter.capturarHuellaEnrolamiento(cedula, !!forzar_simulacion);
+
+      if (enrolRes.exito && enrolRes.template_huella) {
+        await pool.query('UPDATE empleados SET template_huella = $1 WHERE cedula = $2', [enrolRes.template_huella, cedula]);
+        await invalidateEmployeeCache(cedula);
+      }
+
+      await logAuditoria(null, null, 'SuperAdmin', 'ENROLAMIENTO_REMOTO', 'DISPOSITIVOS', `Enrolamiento biometrico ejecutado para cedula ${cedula} via terminal ${dev.nombre}`, clientIp);
+
+      return sendJson(res, 200, enrolRes);
+    }
+
+    // Receptor Push ADMS / IClock / Webhook para terminales que envian datos automaticamente
+    if ((route === '/dispositivos/iclock/cdata' || route.startsWith('/dispositivos/webhook/')) && req.method === 'POST') {
+      const b = await parseBody(req);
+      if (b.cedula || b.pin) {
+        const idNum = Number(b.cedula || b.pin);
+        if (idNum) {
+          punchQueue.push({
+            empleado_cedula: idNum,
+            fecha_hora: b.fecha_hora || new Date().toISOString(),
+            tipo_evento: (b.tipo_evento || 'ENTRADA').toUpperCase(),
+            metodo_auth: (b.metodo || 'HUELLA').toUpperCase(),
+          });
+          setImmediate(flushPunchBatch);
+        }
+      }
+      return sendJson(res, 200, { status: 'OK', result: 'SUCCESS' });
     }
 
     // Ruta no encontrada

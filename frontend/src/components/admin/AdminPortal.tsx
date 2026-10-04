@@ -6,6 +6,7 @@ import { OrganizacionManager } from './OrganizacionManager';
 import { EmpleadosManager } from './EmpleadosManager';
 import { AsistenciasAuditoria } from './AsistenciasAuditoria';
 import { SeguridadManager } from './SeguridadManager';
+import { DispositivosView } from './DispositivosView';
 import {
   LayoutDashboard,
   Network,
@@ -15,6 +16,7 @@ import {
   Shield,
   LogOut,
   Building2,
+  Cpu,
 } from 'lucide-react';
 
 interface AdminPortalProps {
@@ -24,7 +26,7 @@ interface AdminPortalProps {
 export const AdminPortal: React.FC<AdminPortalProps> = ({ onReturnToKiosk }) => {
   const { user, isAuthenticated, logout, hasPermission, getModelScope } = useAuth();
   const [currentSection, setCurrentSection] = useState<
-    'dashboard' | 'organizacion' | 'empleados' | 'asistencias' | 'seguridad'
+    'dashboard' | 'organizacion' | 'empleados' | 'asistencias' | 'seguridad' | 'dispositivos'
   >('dashboard');
 
   // Si no está autenticado, renderizar la puerta de enlace de seguridad
@@ -36,6 +38,7 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({ onReturnToKiosk }) => 
   const canViewEmpleados = hasPermission('empleados', 'leer');
   const canViewAsistencias = hasPermission('asistencias', 'leer');
   const canViewSeguridad = hasPermission('seguridad', 'leer') || user.rol_codigo === 'SUPER_ADMIN';
+  const canViewDispositivos = hasPermission('dispositivos', 'leer') || user.rol_codigo === 'SUPER_ADMIN';
 
   const sedeScope = getModelScope('empleados');
 
@@ -190,6 +193,27 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({ onReturnToKiosk }) => 
               <Shield size={14} /> Seguridad & Modelos
             </button>
           )}
+
+          {canViewDispositivos && (
+            <button
+              onClick={() => setCurrentSection('dispositivos')}
+              style={{
+                display: 'flex',
+                alignItems: 'center',
+                gap: '6px',
+                padding: '7px 12px',
+                borderRadius: 'var(--radius-sm)',
+                fontSize: '0.8rem',
+                fontWeight: 600,
+                background: currentSection === 'dispositivos' ? 'rgba(0, 242, 254, 0.15)' : 'transparent',
+                color: currentSection === 'dispositivos' ? 'var(--accent-cyan)' : 'var(--text-secondary)',
+                border: currentSection === 'dispositivos' ? '1px solid rgba(0, 242, 254, 0.3)' : '1px solid transparent',
+                cursor: 'pointer',
+              }}
+            >
+              <Cpu size={14} /> Dispositivos IP
+            </button>
+          )}
         </div>
 
         {/* Right: Authenticated User Profile & Logout */}
@@ -287,6 +311,7 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({ onReturnToKiosk }) => 
         {currentSection === 'empleados' && canViewEmpleados && <EmpleadosManager />}
         {currentSection === 'asistencias' && canViewAsistencias && <AsistenciasAuditoria />}
         {currentSection === 'seguridad' && canViewSeguridad && <SeguridadManager />}
+        {currentSection === 'dispositivos' && canViewDispositivos && <DispositivosView />}
       </div>
     </div>
   );
