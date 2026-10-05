@@ -14,11 +14,12 @@ use config::Config;
 use db::DatabasePoolManager;
 use dotenvy::dotenv;
 use handlers::{
-    create_cargo, create_departamento, create_empleado, create_role_handler, create_sede,
-    create_turno, create_usuario_handler, escaneo_handler, get_auditoria_handler, get_cargos,
-    get_dashboard_metricas, get_departamentos, get_empleados, get_modelos_handler,
-    get_reporte_asistencias, get_rol_politicas_handler, get_roles_handler, get_sedes, get_turnos,
-    get_usuarios_handler, health_handler, login_handler, logout_handler, toggle_empleado_estado,
+    admin_reset_password_handler, create_cargo, create_departamento, create_empleado,
+    create_role_handler, create_sede, create_turno, create_usuario_handler, escaneo_handler,
+    get_auditoria_handler, get_cargos, get_dashboard_metricas, get_departamentos, get_empleados,
+    get_modelos_handler, get_reporte_asistencias, get_rol_politicas_handler, get_roles_handler,
+    get_sedes, get_turnos, get_usuarios_handler, health_handler, login_handler, logout_handler,
+    register_handler, reset_password_handler, toggle_empleado_estado,
     toggle_usuario_estado_handler, unlock_usuario_handler, update_rol_politicas_handler,
 };
 use state::AppState;
@@ -72,6 +73,8 @@ async fn main() {
         // Rutas de Autenticación y Seguridad
         .route("/api/auth/login", post(login_handler))
         .route("/api/auth/logout", post(logout_handler))
+        .route("/api/auth/register", post(register_handler))
+        .route("/api/auth/reset-password", post(reset_password_handler))
         // Rutas del Portal Administrativo - Gestión de Roles y Permisos
         .route("/api/admin/seguridad/roles", get(get_roles_handler).post(create_role_handler))
         .route("/api/admin/seguridad/modelos", get(get_modelos_handler))
@@ -79,6 +82,7 @@ async fn main() {
         .route("/api/admin/seguridad/usuarios", get(get_usuarios_handler).post(create_usuario_handler))
         .route("/api/admin/seguridad/usuarios/:id/estado", post(toggle_usuario_estado_handler))
         .route("/api/admin/seguridad/usuarios/:id/desbloquear", post(unlock_usuario_handler))
+        .route("/api/admin/seguridad/usuarios/:id/reset-password", post(admin_reset_password_handler))
         .route("/api/admin/seguridad/auditoria", get(get_auditoria_handler))
         .layer(DefaultBodyLimit::max(max_body_limit))
         .layer(cors)

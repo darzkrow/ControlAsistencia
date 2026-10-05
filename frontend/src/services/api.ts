@@ -255,6 +255,25 @@ export interface CreateUsuarioRequest {
   sede_id?: number;
 }
 
+export interface RegisterRequest {
+  username: string;
+  email: string;
+  password: string;
+  nombre_completo: string;
+  rol_id?: number;
+  sede_id?: number;
+}
+
+export interface ResetPasswordRequest {
+  identifier: string;
+  current_password?: string;
+  new_password: string;
+}
+
+export interface AdminResetPasswordRequest {
+  new_password: string;
+}
+
 export interface DispositivoBiometrico {
   id: number;
   nombre: string;
@@ -723,6 +742,48 @@ export async function unlockUsuario(id: number): Promise<void> {
   if (!res.ok) {
     throw new Error(`Error ${res.status} al desbloquear usuario`);
   }
+}
+
+export async function registerUser(payload: RegisterRequest): Promise<{ id: number; ok: boolean; mensaje: string }> {
+  const url = buildApiUrl('/auth/register');
+  const res = await fetch(url, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(payload),
+  });
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}));
+    throw new Error(err.error || `Error ${res.status} al registrar usuario`);
+  }
+  return await res.json();
+}
+
+export async function resetPassword(payload: ResetPasswordRequest): Promise<{ ok: boolean; mensaje: string }> {
+  const url = buildApiUrl('/auth/reset-password');
+  const res = await fetch(url, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(payload),
+  });
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}));
+    throw new Error(err.error || `Error ${res.status} al restablecer la contraseña`);
+  }
+  return await res.json();
+}
+
+export async function adminResetPassword(id: number, payload: AdminResetPasswordRequest): Promise<{ ok: boolean; mensaje: string }> {
+  const url = buildApiUrl(`/admin/seguridad/usuarios/${id}/reset-password`);
+  const res = await fetch(url, {
+    method: 'POST',
+    headers: getAuthHeaders(),
+    body: JSON.stringify(payload),
+  });
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}));
+    throw new Error(err.error || `Error ${res.status} al restablecer la contraseña del usuario`);
+  }
+  return await res.json();
 }
 
 export async function fetchAuditoriaSeguridad(): Promise<AuditoriaSeguridad[]> {

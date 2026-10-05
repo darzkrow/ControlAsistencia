@@ -373,6 +373,47 @@ impl SeguridadRepository {
         Ok(())
     }
 
+    /// Actualizar contraseña de un usuario por su ID y reiniciar estado de intentos fallidos
+    pub async fn update_usuario_password(
+        pool: &PgPool,
+        id: i32,
+        password_hash: &str,
+    ) -> Result<(), sqlx::Error> {
+        sqlx::query(
+            r#"
+            UPDATE public.usuarios_admin
+            SET password_hash = $2, intentos_fallidos = 0, bloqueado_hasta = NULL
+            WHERE id = $1
+            "#,
+        )
+        .bind(id)
+        .bind(password_hash)
+        .execute(pool)
+        .await?;
+
+        Ok(())
+    }
+
+    /// Verificar si ya existe un usuario registrado con el mismo username o email
+    pub async fn check_usuario_exists(
+        pool: &PgPool,
+        username: &str,
+        email: &str,
+    ) -> Result<bool, sqlx::Error> {
+        let count: (i64,) = sqlx::query_as(
+            r#"
+            SELECT COUNT(*) FROM public.usuarios_admin
+            WHERE username = $1 OR email = $2
+            "#,
+        )
+        .bind(username)
+        .bind(email)
+        .fetch_one(pool)
+        .await?;
+
+        Ok(count.0 > 0)
+    }
+
     /// Listar eventos de la pista de auditoría de seguridad
     pub async fn list_auditoria(
         pool: &PgPool,
