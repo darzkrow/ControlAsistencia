@@ -36,6 +36,11 @@ uploads/fotos/*.jpg
 !backend/uploads/fotos/.gitkeep
 !uploads/fotos/.gitkeep
 
+# Python cache files
+__pycache__/
+*.pyc
+*.pyo
+
 # System and editor files
 .DS_Store
 Thumbs.db
@@ -43,3 +48,13 @@ Thumbs.db
 *.swo
 .vscode/
 .idea/
+# Python cache files
+__pycache__/
+*.py[cod]
+*$py.class
+backend/__pycache__/
+backend/*.py[cod]
+backend/*$py.class
+scripts/__pycache__/
+scripts/*.py[cod]
+scripts/*$py.class

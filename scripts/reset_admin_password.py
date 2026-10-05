@@ -41,7 +41,11 @@ def reset_password_via_api(
     """
     Envía solicitud HTTP POST al endpoint de reseteo de contraseña del backend.
     """
-    endpoint_url: str = f"{base_url.rstrip('/')}/api/auth/reset-password"
+    clean_base: str = base_url.rstrip('/')
+    if not clean_base.endswith('/api/v1') and not clean_base.endswith('/api'):
+        endpoint_url: str = f"{clean_base}/api/v1/auth/reset-password"
+    else:
+        endpoint_url = f"{clean_base}/auth/reset-password"
     payload: Dict[str, Any] = {
         "identifier": identifier,
         "new_password": new_password,
