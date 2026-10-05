@@ -1,11 +1,22 @@
+const envHost = process.env.EXPO_PUBLIC_BACKEND_HOST || '192.168.30.104';
+const envPort = process.env.EXPO_PUBLIC_BACKEND_PORT || '3000';
+const envPrefix = (process.env.EXPO_PUBLIC_API_PREFIX || '/api/v1').replace(/\/+$/, '');
+const envApiUrl = (
+  process.env.EXPO_PUBLIC_API_URL || `http://${envHost}:${envPort}${envPrefix}`
+).replace(/\/+$/, '');
+
 export const APP_CONFIG = {
   APP_NAME: 'Rapture Biometrics Mobile',
   VERSION: '1.0.0',
-  DEFAULT_API_URL: 'http://192.168.30.104:3000/api/v1',
-  FALLBACK_LAN_URL: 'http://192.168.30.104:3000/api/v1',
-  DEFAULT_TIMEZONE: 'America/Caracas',
-  TIME_FORMAT: '12h',
-  GPS_HIGH_ACCURACY_THRESHOLD_METERS: 25,
+  DEFAULT_API_URL: envApiUrl,
+  FALLBACK_LAN_URL: envApiUrl,
+  BACKEND_HOST: envHost,
+  BACKEND_PORT: envPort,
+  API_PREFIX: envPrefix,
+  DEFAULT_TIMEZONE: process.env.EXPO_PUBLIC_TIMEZONE || 'America/Caracas',
+  TIME_FORMAT: process.env.EXPO_PUBLIC_TIME_FORMAT || '12h',
+  GPS_HIGH_ACCURACY_THRESHOLD_METERS:
+    Number(process.env.EXPO_PUBLIC_GPS_HIGH_ACCURACY_THRESHOLD_METERS) || 25,
   MAX_OFFLINE_QUEUE_ITEMS: 200,
   DEFAULT_SEDE_FALLBACK: {
     id: 1,
@@ -16,7 +27,7 @@ export const APP_CONFIG = {
     latitud: 10.4910000,
     longitud: -66.8780000,
     radio_tolerancia_metros: 150,
-  }
+  },
 };
 
 export const THEME = {

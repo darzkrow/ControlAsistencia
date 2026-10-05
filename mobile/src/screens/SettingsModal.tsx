@@ -129,24 +129,26 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
             <View style={styles.presetRow}>
               <TouchableOpacity
                 style={styles.presetChip}
-                onPress={() => applyPreset('http://192.168.30.104:3000/api/v1')}
+                onPress={() => applyPreset(APP_CONFIG.DEFAULT_API_URL)}
                 activeOpacity={0.7}
               >
-                <Text style={styles.presetChipText}>Host LAN (192.168.30.104:3000)</Text>
+                <Text style={styles.presetChipText}>
+                  Default .env ({APP_CONFIG.BACKEND_HOST}:{APP_CONFIG.BACKEND_PORT})
+                </Text>
               </TouchableOpacity>
               <TouchableOpacity
                 style={styles.presetChip}
-                onPress={() => applyPreset('http://10.0.2.2:3000/api/v1')}
+                onPress={() => applyPreset(`http://10.0.2.2:${APP_CONFIG.BACKEND_PORT}${APP_CONFIG.API_PREFIX}`)}
                 activeOpacity={0.7}
               >
-                <Text style={styles.presetChipText}>Emulador (10.0.2.2:3000)</Text>
+                <Text style={styles.presetChipText}>Emulador (10.0.2.2)</Text>
               </TouchableOpacity>
               <TouchableOpacity
                 style={styles.presetChip}
-                onPress={() => applyPreset('http://127.0.0.1:3000/api/v1')}
+                onPress={() => applyPreset(`http://127.0.0.1:${APP_CONFIG.BACKEND_PORT}${APP_CONFIG.API_PREFIX}`)}
                 activeOpacity={0.7}
               >
-                <Text style={styles.presetChipText}>Local (127.0.0.1:3000)</Text>
+                <Text style={styles.presetChipText}>Local (127.0.0.1)</Text>
               </TouchableOpacity>
             </View>
 
@@ -155,7 +157,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
               style={styles.textInput}
               value={apiUrlInput}
               onChangeText={setApiUrlInput}
-              placeholder="http://192.168.30.104:3000/api/v1"
+              placeholder={APP_CONFIG.DEFAULT_API_URL}
               placeholderTextColor={THEME.colors.textMuted}
               autoCapitalize="none"
               autoCorrect={false}

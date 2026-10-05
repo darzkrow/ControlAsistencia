@@ -2,6 +2,7 @@ const fs = require('node:fs');
 const path = require('node:path');
 const http = require('node:http');
 const crypto = require('node:crypto');
+const os = require('node:os');
 const { Pool } = require('pg');
 const Redis = require('ioredis');
 const { createBiometricAdapter, testTcpConnectivity } = require('./drivers/biometric_adapters');
@@ -1435,11 +1436,29 @@ const server = http.createServer(async (req, res) => {
   }
 });
 
+function getPrimaryLocalIp() {
+  const nets = os.networkInterfaces();
+  for (const name of Object.keys(nets)) {
+    for (const net of nets[name] || []) {
+      if (
+        net.family === 'IPv4' &&
+        !net.internal &&
+        !net.address.startsWith('172.') &&
+        !net.address.startsWith('169.254.')
+      ) {
+        return net.address;
+      }
+    }
+  }
+  return 'localhost';
+}
+
 server.listen(PORT, HOST, () => {
+  const lanIp = getPrimaryLocalIp();
   console.log(`[INFO] Rapture Biometrics Backend en ejecucion en puerto ${PORT}`);
-  console.log(`[INFO] Escuchando en todas las interfaces de red (0.0.0.0:${PORT})`);
+  console.log(`[INFO] Escuchando en todas las interfaces de red (${HOST}:${PORT})`);
   console.log(`[INFO] Acceso Local: http://localhost:${PORT}${API_PREFIX}`);
-  console.log(`[INFO] Acceso LAN / App Movil: http://192.168.30.104:${PORT}${API_PREFIX}`);
+  console.log(`[INFO] Acceso LAN / App Movil: http://${lanIp}:${PORT}${API_PREFIX}`);
   console.log(`[INFO] Conectado a PostgreSQL 16 (api_db)`);
   console.log(`[INFO] Prefijo de version API configurado: ${API_PREFIX}`);
   console.log(`[INFO] Zona horaria configurada: ${TIMEZONE} (Formato ${TIME_FORMAT})`);

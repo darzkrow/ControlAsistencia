@@ -3,6 +3,13 @@ echo ===========================================================================
 echo COMPILACION AUTOMATIZADA DE APK EN CONTENEDOR DOCKER ANDROID
 echo ==============================================================================
 
+if not exist ".env" (
+    if exist ".env.example" (
+        echo [INFO] Archivo .env no encontrado en mobile. Inicializando desde .env.example...
+        copy ".env.example" ".env"
+    )
+)
+
 echo [1/3] Construyendo imagen de compilacion Android con Node.js y SDK 34...
 docker build -t rapture-android-builder -f Dockerfile.android-builder .
 if %ERRORLEVEL% NEQ 0 (
