@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import {
   View,
   Text,
@@ -20,6 +20,7 @@ interface SettingsModalProps {
   selectedSedeId?: number;
   onSelectSede: (id: number) => void;
   onSimulateGpsCoords?: (lat: number, lon: number) => void;
+  onSaveServerUrl?: (url: string) => void;
 }
 
 export const SettingsModal: React.FC<SettingsModalProps> = ({
@@ -29,27 +30,69 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
   selectedSedeId,
   onSelectSede,
   onSimulateGpsCoords,
+  onSaveServerUrl,
 }) => {
   const [apiUrlInput, setApiUrlInput] = useState<string>(getApiUrl());
   const [isTesting, setIsTesting] = useState<boolean>(false);
   const [testResult, setTestResult] = useState<{ ok: boolean; msg: string } | null>(null);
 
+  useEffect(() => {
+    if (visible) {
+      setApiUrlInput(getApiUrl());
+      setTestResult(null);
+    }
+  }, [visible]);
+
   const handleTestConnection = async () => {
     setIsTesting(true);
     setTestResult(null);
     try {
-      const ok = await checkServerHealth(apiUrlInput);
+      const cleanUrl = apiUrlInput.trim().replace(/\/+$/, '');
+      const ok = await checkServerHealth(cleanUrl);
       if (ok) {
-        setApiUrl(apiUrlInput);
+        setApiUrl(cleanUrl);
+        if (onSaveServerUrl) onSaveServerUrl(cleanUrl);
         setTestResult({ ok: true, msg: 'Conexion exitosa con el servidor Rapture Backend' });
       } else {
-        setTestResult({ ok: false, msg: 'No se pudo contactar el servidor en esa direccion' });
+        setTestResult({
+          ok: false,
+          msg: 'No se pudo contactar el servidor. Verifique que el backend este activo en ' + cleanUrl + '/health',
+        });
       }
     } catch {
-      setTestResult({ ok: false, msg: 'Error de red o timeout' });
+      setTestResult({ ok: false, msg: 'Error de red o timeout al intentar contactar la IP.' });
     } finally {
       setIsTesting(false);
     }
+  };
+
+  const handleSaveAndApply = async () => {
+    const cleanUrl = apiUrlInput.trim().replace(/\/+$/, '');
+    setApiUrl(cleanUrl);
+    if (onSaveServerUrl) onSaveServerUrl(cleanUrl);
+    setIsTesting(true);
+    setTestResult(null);
+    try {
+      const ok = await checkServerHealth(cleanUrl);
+      if (ok) {
+        setTestResult({ ok: true, msg: 'Direccion guardada y verificada exitosamente.' });
+        setTimeout(() => onClose(), 800);
+      } else {
+        setTestResult({
+          ok: false,
+          msg: 'Direccion guardada, pero el servidor no responde al healthcheck. Verifique conexion WiFi/LAN.',
+        });
+      }
+    } catch {
+      setTestResult({ ok: false, msg: 'Direccion guardada con advertencia de red.' });
+    } finally {
+      setIsTesting(false);
+    }
+  };
+
+  const applyPreset = (presetUrl: string) => {
+    setApiUrlInput(presetUrl);
+    setTestResult(null);
   };
 
   const handleSelectSimulatedLocation = (type: 'inside' | 'outside') => {
@@ -78,28 +121,69 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
           <ScrollView style={styles.body}>
             {/* Seccion Servidor */}
             <Text style={styles.sectionHeader}>SERVIDOR BACKEND Y RED</Text>
+            <Text style={styles.fieldDesc}>
+              Especifique la IP y puerto del equipo donde corre el backend. Ambos dispositivos deben estar en la misma red WiFi o LAN.
+            </Text>
+
+            <Text style={styles.fieldLabel}>ACCESOS RAPIDOS DE RED</Text>
+            <View style={styles.presetRow}>
+              <TouchableOpacity
+                style={styles.presetChip}
+                onPress={() => applyPreset('http://192.168.30.104:3000/api/v1')}
+                activeOpacity={0.7}
+              >
+                <Text style={styles.presetChipText}>Host LAN (192.168.30.104:3000)</Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                style={styles.presetChip}
+                onPress={() => applyPreset('http://10.0.2.2:3000/api/v1')}
+                activeOpacity={0.7}
+              >
+                <Text style={styles.presetChipText}>Emulador (10.0.2.2:3000)</Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                style={styles.presetChip}
+                onPress={() => applyPreset('http://127.0.0.1:3000/api/v1')}
+                activeOpacity={0.7}
+              >
+                <Text style={styles.presetChipText}>Local (127.0.0.1:3000)</Text>
+              </TouchableOpacity>
+            </View>
+
             <Text style={styles.fieldLabel}>URL BASE DEL API</Text>
             <TextInput
               style={styles.textInput}
               value={apiUrlInput}
               onChangeText={setApiUrlInput}
-              placeholder="http://192.168.1.100:3000/api/v1"
+              placeholder="http://192.168.30.104:3000/api/v1"
               placeholderTextColor={THEME.colors.textMuted}
               autoCapitalize="none"
               autoCorrect={false}
             />
 
-            <TouchableOpacity
-              style={styles.testBtn}
-              onPress={handleTestConnection}
-              disabled={isTesting}
-            >
-              {isTesting ? (
-                <ActivityIndicator size="small" color={THEME.colors.primary} />
-              ) : (
-                <Text style={styles.testBtnText}>PROBAR CONEXION</Text>
-              )}
-            </TouchableOpacity>
+            <View style={styles.actionButtonsRow}>
+              <TouchableOpacity
+                style={[styles.actionBtn, styles.testBtn]}
+                onPress={handleTestConnection}
+                disabled={isTesting}
+                activeOpacity={0.7}
+              >
+                {isTesting ? (
+                  <ActivityIndicator size="small" color={THEME.colors.primary} />
+                ) : (
+                  <Text style={styles.testBtnText}>PROBAR CONEXION</Text>
+                )}
+              </TouchableOpacity>
+
+              <TouchableOpacity
+                style={[styles.actionBtn, styles.saveBtn]}
+                onPress={handleSaveAndApply}
+                disabled={isTesting}
+                activeOpacity={0.7}
+              >
+                <Text style={styles.saveBtnText}>GUARDAR Y APLICAR</Text>
+              </TouchableOpacity>
+            </View>
 
             {testResult && (
               <View
@@ -262,18 +346,55 @@ const styles = StyleSheet.create({
     fontSize: 13,
     marginBottom: 10,
   },
-  testBtn: {
-    backgroundColor: 'rgba(14, 165, 233, 0.15)',
+  presetRow: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 6,
+    marginBottom: 12,
+  },
+  presetChip: {
+    backgroundColor: 'rgba(15, 23, 42, 0.8)',
     borderWidth: 1,
-    borderColor: 'rgba(14, 165, 233, 0.4)',
+    borderColor: 'rgba(56, 189, 248, 0.25)',
+    paddingHorizontal: 8,
+    paddingVertical: 5,
+    borderRadius: 6,
+  },
+  presetChipText: {
+    color: THEME.colors.primary,
+    fontSize: 10,
+    fontWeight: '700',
+  },
+  actionButtonsRow: {
+    flexDirection: 'row',
+    gap: 10,
+    marginBottom: 12,
+  },
+  actionBtn: {
+    flex: 1,
     paddingVertical: 10,
     borderRadius: 8,
     alignItems: 'center',
     justifyContent: 'center',
-    marginBottom: 12,
+  },
+  testBtn: {
+    backgroundColor: 'rgba(14, 165, 233, 0.15)',
+    borderWidth: 1,
+    borderColor: 'rgba(14, 165, 233, 0.4)',
   },
   testBtnText: {
     color: THEME.colors.primary,
+    fontSize: 11,
+    fontWeight: '800',
+    letterSpacing: 0.5,
+  },
+  saveBtn: {
+    backgroundColor: THEME.colors.primary,
+    borderWidth: 1,
+    borderColor: THEME.colors.primary,
+  },
+  saveBtnText: {
+    color: '#070b14',
     fontSize: 11,
     fontWeight: '800',
     letterSpacing: 0.5,

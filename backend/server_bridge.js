@@ -28,7 +28,7 @@ if (fs.existsSync(envPath)) {
 }
 
 const PORT = Number(process.env.SERVER_PORT) || 3000;
-const HOST = process.env.SERVER_HOST || '127.0.0.1';
+const HOST = process.env.SERVER_HOST || '0.0.0.0';
 const API_PREFIX = (process.env.API_PREFIX || '/api/v1').replace(/\/+$/, '');
 const TIMEZONE = process.env.TIMEZONE || 'America/Caracas';
 const TIME_FORMAT = process.env.TIME_FORMAT || '12h';
@@ -1436,9 +1436,12 @@ const server = http.createServer(async (req, res) => {
 });
 
 server.listen(PORT, HOST, () => {
-  console.log(`[INFO] Rapture Biometrics Backend en ejecucion en http://${HOST}:${PORT}`);
-  console.log(`[INFO] Conectado a PostgreSQL 16 (api_db) en localhost:5432`);
+  console.log(`[INFO] Rapture Biometrics Backend en ejecucion en puerto ${PORT}`);
+  console.log(`[INFO] Escuchando en todas las interfaces de red (0.0.0.0:${PORT})`);
+  console.log(`[INFO] Acceso Local: http://localhost:${PORT}${API_PREFIX}`);
+  console.log(`[INFO] Acceso LAN / App Movil: http://192.168.30.104:${PORT}${API_PREFIX}`);
+  console.log(`[INFO] Conectado a PostgreSQL 16 (api_db)`);
   console.log(`[INFO] Prefijo de version API configurado: ${API_PREFIX}`);
   console.log(`[INFO] Zona horaria configurada: ${TIMEZONE} (Formato ${TIME_FORMAT})`);
-  console.log(`[INFO] Healthcheck disponible en http://${HOST}:${PORT}${API_PREFIX}/health`);
+  console.log(`[INFO] Healthcheck disponible en http://${HOST === '0.0.0.0' ? '127.0.0.1' : HOST}:${PORT}${API_PREFIX}/health`);
 });

@@ -337,6 +337,18 @@ export const MainKioskScreen: React.FC = () => {
             timestamp: Date.now(),
           });
         }}
+        onSaveServerUrl={async (newUrl) => {
+          const online = await checkServerHealth(newUrl);
+          setServerConnected(online);
+          if (online) {
+            const sedesList = await fetchSedesGeocercas();
+            if (sedesList.length > 0) {
+              setSedes(sedesList);
+              setSelectedSedeId(sedesList[0].id);
+            }
+            await sincronizarColaOffline();
+          }
+        }}
       />
 
       {/* Modal de Historial Local */}

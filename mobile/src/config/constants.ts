@@ -1,8 +1,8 @@
 export const APP_CONFIG = {
   APP_NAME: 'Rapture Biometrics Mobile',
   VERSION: '1.0.0',
-  DEFAULT_API_URL: 'http://10.0.2.2:3000/api/v1', // 10.0.2.2 para emulador Android, cambiar a IP LAN en dispositivo fisico
-  FALLBACK_LAN_URL: 'http://192.168.1.100:3000/api/v1',
+  DEFAULT_API_URL: 'http://192.168.30.104:3000/api/v1',
+  FALLBACK_LAN_URL: 'http://192.168.30.104:3000/api/v1',
   DEFAULT_TIMEZONE: 'America/Caracas',
   TIME_FORMAT: '12h',
   GPS_HIGH_ACCURACY_THRESHOLD_METERS: 25,
