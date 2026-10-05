@@ -150,6 +150,15 @@ export interface AsistenciaReporte {
   minutos_retardo: number;
   foto_entrada?: string;
   foto_salida?: string;
+  fuera_de_sede_entrada?: boolean;
+  distancia_sede_entrada?: number;
+  fuera_de_sede_salida?: boolean;
+  distancia_sede_salida?: number;
+  radio_tolerancia_metros?: number;
+  alerta_fraude_rrhh?: boolean;
+  dispositivo_movil_info?: string;
+  latitud_entrada?: string | number;
+  longitud_entrada?: string | number;
 }
 
 export interface DashboardMetrics {
@@ -814,4 +823,54 @@ export async function enrolarCapturaDispositivo(id: number, cedula: number, forz
   }
   return await res.json();
 }
+
+// ------------------------------------------------------------------------------
+// GESTION DE ALERTAS DE FRAUDE Y GEOVALLAS GPS (RRHH)
+// ------------------------------------------------------------------------------
+
+export interface AlertaFraudeRRHH {
+  id: number;
+  empleado_cedula: number;
+  nombre_completo: string;
+  departamento: string;
+  sede_nombre: string;
+  radio_tolerancia_metros: number;
+  fecha_hora: string;
+  tipo_evento: string;
+  metodo_auth: string;
+  foto_path?: string;
+  latitud?: string | number;
+  longitud?: string | number;
+  precision_gps?: string | number;
+  distancia_metros: number;
+  fuera_de_sede: boolean;
+  alerta_fraude_rrhh: boolean;
+  estado_auditoria_rrhh: string;
+  notas_auditoria?: string;
+  origen_dispositivo?: string;
+}
+
+export async function fetchAlertasFraude(): Promise<AlertaFraudeRRHH[]> {
+  const url = buildApiUrl('/asistencia/alertas-fraude');
+  const res = await fetch(url, {
+    headers: getAuthHeaders(),
+  });
+  if (!res.ok) return [];
+  return await res.json();
+}
+
+export async function resolverAlertaFraude(
+  id: number,
+  estado_auditoria: string,
+  notas: string
+): Promise<boolean> {
+  const url = buildApiUrl(`/asistencia/alertas-fraude/${id}/auditar`);
+  const res = await fetch(url, {
+    method: 'PUT',
+    headers: getAuthHeaders(),
+    body: JSON.stringify({ estado_auditoria, notas }),
+  });
+  return res.ok;
+}
+
 
