@@ -14,6 +14,7 @@ import {
   type Turno,
 } from '../../services/api';
 import { Building2, Layers, Briefcase, Clock, Plus, X, Check, MapPin, RefreshCw } from 'lucide-react';
+import { formatTimeTo12h } from '../../utils/dateUtils';
 
 export const OrganizacionManager: React.FC = () => {
   const [activeTab, setActiveTab] = useState<'sedes' | 'deptos' | 'cargos' | 'turnos'>('sedes');
@@ -411,7 +412,7 @@ export const OrganizacionManager: React.FC = () => {
                 <tr key={t.id} style={{ borderBottom: '1px solid var(--border-subtle)' }}>
                   <td style={{ padding: '12px', fontWeight: 700, color: '#fff' }}>{t.nombre}</td>
                   <td style={{ padding: '12px' }} className="mono">
-                    <span style={{ color: 'var(--accent-emerald)' }}>{t.hora_entrada}</span> - <span style={{ color: 'var(--accent-coral)' }}>{t.hora_salida}</span>
+                    <span style={{ color: 'var(--accent-emerald)' }}>{formatTimeTo12h(t.hora_entrada, false)}</span> - <span style={{ color: 'var(--accent-coral)' }}>{formatTimeTo12h(t.hora_salida, false)}</span>
                   </td>
                   <td style={{ padding: '12px' }}>{t.tolerancia_minutos} minutos</td>
                   <td style={{ padding: '12px', color: 'var(--text-secondary)' }}>{t.dias_laborales}</td>

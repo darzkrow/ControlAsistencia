@@ -246,6 +246,63 @@ export interface CreateUsuarioRequest {
   sede_id?: number;
 }
 
+export interface DispositivoBiometrico {
+  id: number;
+  nombre: string;
+  marca: 'ZKTeco' | 'Hikvision' | 'Dahua' | 'Anviz' | 'Suprema' | 'Generico' | string;
+  modelo: string;
+  direccion_ip: string;
+  puerto: number;
+  protocolo: string;
+  clave_comunicacion?: string;
+  numero_serie?: string;
+  sede_id?: number | null;
+  nombre_sede?: string;
+  tipo_acceso: 'entrada' | 'salida' | 'ambos';
+  activo: boolean;
+  estado_conexion: 'en_linea' | 'desconectado' | 'error';
+  ultimo_ping?: string | null;
+  latencia_ms?: number;
+  ultima_sincronizacion?: string | null;
+  total_marcaciones_sincronizadas?: number;
+  created_at?: string;
+}
+
+export interface CreateDispositivoRequest {
+  nombre: string;
+  marca: string;
+  modelo?: string;
+  direccion_ip: string;
+  puerto: number;
+  protocolo?: string;
+  clave_comunicacion?: string;
+  numero_serie?: string;
+  sede_id?: number | null;
+  tipo_acceso?: 'entrada' | 'salida' | 'ambos';
+}
+
+export interface PingDispositivoResponse {
+  ok: boolean;
+  online: boolean;
+  latencia_ms: number;
+  mensaje: string;
+}
+
+export interface SyncDispositivoResponse {
+  ok: boolean;
+  marcaciones_ingeridas: number;
+  origen?: string;
+  mensaje: string;
+}
+
+export interface EnrolarCapturaResponse {
+  exito: boolean;
+  cedula?: number;
+  template_huella?: string;
+  origen?: string;
+  mensaje: string;
+}
+
 // ------------------------------------------------------------------------------
 // ------------------------------------------------------------------------------
 // Configuración de URL Base y Sesión de Seguridad
@@ -664,6 +721,96 @@ export async function fetchAuditoriaSeguridad(): Promise<AuditoriaSeguridad[]> {
   const res = await fetch(url, { headers: getAuthHeaders() });
   if (!res.ok) {
     throw new Error(`Error ${res.status} al consultar auditoría forense`);
+  }
+  return await res.json();
+}
+
+// ------------------------------------------------------------------------------
+// Dispositivos Biométricos y Control de Acceso IP
+// ------------------------------------------------------------------------------
+
+export async function fetchDispositivos(): Promise<DispositivoBiometrico[]> {
+  const url = buildApiUrl('/admin/dispositivos');
+  const res = await fetch(url, { headers: getAuthHeaders() });
+  if (!res.ok) {
+    throw new Error(`Error ${res.status} al consultar dispositivos biometricos`);
+  }
+  return await res.json();
+}
+
+export async function createDispositivo(payload: CreateDispositivoRequest): Promise<DispositivoBiometrico> {
+  const url = buildApiUrl('/admin/dispositivos');
+  const res = await fetch(url, {
+    method: 'POST',
+    headers: getAuthHeaders(),
+    body: JSON.stringify(payload),
+  });
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}));
+    throw new Error(err.error || `Error ${res.status} al registrar dispositivo biometrico`);
+  }
+  return await res.json();
+}
+
+export async function updateDispositivo(id: number, payload: Partial<CreateDispositivoRequest> & { activo?: boolean }): Promise<DispositivoBiometrico> {
+  const url = buildApiUrl(`/admin/dispositivos/${id}`);
+  const res = await fetch(url, {
+    method: 'PUT',
+    headers: getAuthHeaders(),
+    body: JSON.stringify(payload),
+  });
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}));
+    throw new Error(err.error || `Error ${res.status} al actualizar dispositivo`);
+  }
+  return await res.json();
+}
+
+export async function deleteDispositivo(id: number): Promise<void> {
+  const url = buildApiUrl(`/admin/dispositivos/${id}`);
+  const res = await fetch(url, {
+    method: 'DELETE',
+    headers: getAuthHeaders(),
+  });
+  if (!res.ok) {
+    throw new Error(`Error ${res.status} al eliminar dispositivo`);
+  }
+}
+
+export async function pingDispositivo(id: number): Promise<PingDispositivoResponse> {
+  const url = buildApiUrl(`/admin/dispositivos/${id}/ping`);
+  const res = await fetch(url, {
+    method: 'POST',
+    headers: getAuthHeaders(),
+  });
+  if (!res.ok) {
+    throw new Error(`Error ${res.status} al ejecutar ping al dispositivo`);
+  }
+  return await res.json();
+}
+
+export async function sincronizarDispositivo(id: number): Promise<SyncDispositivoResponse> {
+  const url = buildApiUrl(`/admin/dispositivos/${id}/sincronizar`);
+  const res = await fetch(url, {
+    method: 'POST',
+    headers: getAuthHeaders(),
+  });
+  if (!res.ok) {
+    throw new Error(`Error ${res.status} al sincronizar marcaciones del dispositivo`);
+  }
+  return await res.json();
+}
+
+export async function enrolarCapturaDispositivo(id: number, cedula: number, forzarSimulacion = false): Promise<EnrolarCapturaResponse> {
+  const url = buildApiUrl(`/admin/dispositivos/${id}/enrolar-captura`);
+  const res = await fetch(url, {
+    method: 'POST',
+    headers: getAuthHeaders(),
+    body: JSON.stringify({ cedula, forzar_simulacion: forzarSimulacion }),
+  });
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}));
+    throw new Error(err.error || `Error ${res.status} al ejecutar enrolamiento biometrico`);
   }
   return await res.json();
 }

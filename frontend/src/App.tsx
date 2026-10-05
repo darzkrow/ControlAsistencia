@@ -10,9 +10,11 @@ import { AdminPortal } from './components/admin/AdminPortal';
 import {
   registrarEscaneo,
   checkServerHealth,
+  type EscaneoResponse,
+  type EventoReciente,
 } from './services/api';
-import type { EscaneoResponse, EventoReciente } from './services/api';
 import { biometricAudio } from './services/audio';
+import { formatTimeTo12h } from './utils/dateUtils';
 
 export const App: React.FC = () => {
   const [cedula, setCedula] = useState<string>('');
@@ -106,7 +108,7 @@ export const App: React.FC = () => {
         nombre: response.nombre_completo || (response.es_empleado ? 'Empleado' : 'Visitante'),
         departamento: response.departamento,
         tipo: response.tipo_evento,
-        timestamp: new Date().toLocaleTimeString('es-ES', { hour: '2-digit', minute: '2-digit', second: '2-digit' }),
+        timestamp: formatTimeTo12h(new Date(), true),
         metodo: mode,
         exito: response.es_empleado,
       };
@@ -131,7 +133,7 @@ export const App: React.FC = () => {
         cedula: idNum,
         nombre: 'Conexión Fallida',
         tipo: 'rechazado',
-        timestamp: new Date().toLocaleTimeString('es-ES', { hour: '2-digit', minute: '2-digit', second: '2-digit' }),
+        timestamp: formatTimeTo12h(new Date(), true),
         metodo: mode,
         exito: false,
       };

@@ -18,6 +18,7 @@ import {
   type AuditoriaSeguridad,
   type Sede,
 } from '../../services/api';
+import { formatDateTimeTo12h } from '../../utils/dateUtils';
 import {
   Shield,
   Users,
@@ -765,7 +766,7 @@ export const SeguridadManager: React.FC = () => {
                 return (
                   <tr key={a.id} style={{ borderBottom: '1px solid var(--border-subtle)' }}>
                     <td className="mono" style={{ padding: '12px', fontSize: '0.78rem', color: 'var(--text-secondary)' }}>
-                      {new Date(a.fecha_hora).toLocaleString('es-ES')}
+                      {formatDateTimeTo12h(a.fecha_hora)}
                     </td>
                     <td style={{ padding: '12px' }}>
                       <span

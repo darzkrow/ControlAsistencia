@@ -13,7 +13,8 @@ docs/
 ├── README.md                              # Indice maestro y mapa de navegacion
 ├── architecture/
 │   ├── system-overview.md                 # Arquitectura de alto nivel y flujo de datos
-│   └── tauri-desktop-setup.md             # Guia de empaquetado de escritorio y soporte USB
+│   ├── tauri-desktop-setup.md             # Guia de empaquetado de escritorio y soporte USB
+│   └── ip-biometric-terminals-integration.md # Integracion de terminales y captahuellas IP multi-marca
 ├── database/
 │   ├── data-model.md                      # Modelo entidad-relacion y diccionario DDL
 │   └── orm-and-connection-policies.md     # Gestion de conexiones SQLx y resiliencia
@@ -33,6 +34,7 @@ docs/
 ## 1. Arquitectura y Diseno de Software
 - **[Vision General del Sistema](file:///d:/PerfilUsuario/Desktop/captador_huellas-master/docs/architecture/system-overview.md):** Describe los componentes principales (Kiosko Web, Portal de Administracion, Backend Asincrono en Rust, Worker Pool de OpenCV y persistencia relacional).
 - **[Empaquetado de Escritorio Tauri y Lectores de Huella USB](file:///d:/PerfilUsuario/Desktop/captador_huellas-master/docs/architecture/tauri-desktop-setup.md):** Especificacion para distribucion en estaciones de trabajo fisicas de Windows/Linux y conexion con lectores opticos de huella.
+- **[Integracion de Terminales y Captahuellas IP Multi-Marca](file:///d:/PerfilUsuario/Desktop/captador_huellas-master/docs/architecture/ip-biometric-terminals-integration.md):** Arquitectura y guia de configuracion para controles de acceso fisicos (ZKTeco, Hikvision, Dahua) con IP fija, modos Push/Pull y enrolamiento remoto.
 
 ## 2. Base de Datos y Persistencia
 - **[Modelo de Datos Relacional y Diccionario](file:///d:/PerfilUsuario/Desktop/captador_huellas-master/docs/database/data-model.md):** Detalle de las 11 tablas del sistema: Sedes, Departamentos, Cargos, Turnos, Empleados, Roles, Modelos, Politicas RBAC, Usuarios Admin, Auditoria de Seguridad, Eventos del Lector y Jornada Diaria.

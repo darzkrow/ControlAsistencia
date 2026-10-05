@@ -111,11 +111,37 @@ CREATE TABLE IF NOT EXISTS public.jornada_diaria (
     PRIMARY KEY (empleado_cedula, fecha)
 );
 
+-- ------------------------------------------------------------------------------
+-- 8. DISPOSITIVOS BIOMETRICOS Y CONTROL DE ACCESO IP
+-- ------------------------------------------------------------------------------
+CREATE TABLE IF NOT EXISTS public.dispositivos_biometricos (
+    id SERIAL PRIMARY KEY,
+    nombre VARCHAR(100) NOT NULL,
+    marca VARCHAR(50) NOT NULL, -- ZKTeco, Hikvision, Dahua, Anviz, Suprema, Generico
+    modelo VARCHAR(100),
+    direccion_ip VARCHAR(45) NOT NULL,
+    puerto INTEGER NOT NULL DEFAULT 4370,
+    protocolo VARCHAR(50) NOT NULL DEFAULT 'ZK_TCP', -- ZK_TCP, ZK_UDP, HIKVISION_ISAPI, DAHUA_CGI, HTTP_PUSH
+    clave_comunicacion VARCHAR(50) DEFAULT '0',
+    numero_serie VARCHAR(100) UNIQUE,
+    sede_id INTEGER REFERENCES public.sedes(id) ON DELETE SET NULL,
+    tipo_acceso VARCHAR(30) DEFAULT 'ambos', -- entrada, salida, ambos
+    activo BOOLEAN DEFAULT true NOT NULL,
+    estado_conexion VARCHAR(20) DEFAULT 'desconectado', -- en_linea, desconectado, error
+    ultimo_ping TIMESTAMP WITHOUT TIME ZONE,
+    latencia_ms INTEGER DEFAULT 0,
+    ultima_sincronizacion TIMESTAMP WITHOUT TIME ZONE,
+    total_marcaciones_sincronizadas INTEGER DEFAULT 0,
+    created_at TIMESTAMP WITHOUT TIME ZONE DEFAULT CURRENT_TIMESTAMP
+);
+
 -- Índices de alto rendimiento
 CREATE INDEX IF NOT EXISTS idx_empleados_sede ON public.empleados(sede_id);
 CREATE INDEX IF NOT EXISTS idx_empleados_depto ON public.empleados(departamento_id);
 CREATE INDEX IF NOT EXISTS idx_eventos_lector_fecha ON public.eventos_lector(empleado_cedula, fecha_hora DESC);
 CREATE INDEX IF NOT EXISTS idx_jornada_fecha ON public.jornada_diaria(fecha, empleado_cedula);
+CREATE INDEX IF NOT EXISTS idx_dispositivos_ip ON public.dispositivos_biometricos(direccion_ip);
+CREATE INDEX IF NOT EXISTS idx_dispositivos_sede ON public.dispositivos_biometricos(sede_id);
 
 -- ==============================================================================
 -- DATOS SEMILLA INICIALES (Estructura Organizativa Dinámica)
@@ -252,7 +278,8 @@ INSERT INTO public.modelos_recurso (codigo, nombre, descripcion, icono, soporta_
 ('turnos', 'Turnos y Horarios', 'Reglas de evaluación, tolerancias y jornadas', 'Clock', false, 'crear,leer,actualizar,eliminar'),
 ('empleados', 'Colaboradores y Biometría', 'Directorio, enrolamiento facial y huellas dactilares', 'Users', true, 'crear,leer,actualizar,eliminar,exportar'),
 ('asistencias', 'Auditoría de Asistencias', 'Control de marcaciones, retardos y reportes', 'CalendarCheck', true, 'leer,exportar'),
-('seguridad', 'Seguridad, Roles y Políticas', 'Gestión de usuarios admin, políticas RBAC y modelos', 'Shield', false, 'crear,leer,actualizar,eliminar,exportar')
+('seguridad', 'Seguridad, Roles y Políticas', 'Gestión de usuarios admin, políticas RBAC y modelos', 'Shield', false, 'crear,leer,actualizar,eliminar,exportar'),
+('dispositivos', 'Control de Acceso y Captahuellas IP', 'Terminales biometricos de red, integracion multi-marca y captahuellas', 'Cpu', true, 'crear,leer,actualizar,eliminar,exportar')
 ON CONFLICT (codigo) DO NOTHING;
 
 -- 2. Roles del Sistema
@@ -272,7 +299,8 @@ INSERT INTO public.rol_politicas_modelo (rol_id, modelo_codigo, puede_crear, pue
 (1, 'turnos', true, true, true, true, true, 'global'),
 (1, 'empleados', true, true, true, true, true, 'global'),
 (1, 'asistencias', true, true, true, true, true, 'global'),
-(1, 'seguridad', true, true, true, true, true, 'global')
+(1, 'seguridad', true, true, true, true, true, 'global'),
+(1, 'dispositivos', true, true, true, true, true, 'global')
 ON CONFLICT (rol_id, modelo_codigo) DO NOTHING;
 
 -- ADMIN_RRHH: Todo en personal, organización y asistencia (sin administración de seguridad)
@@ -283,7 +311,8 @@ INSERT INTO public.rol_politicas_modelo (rol_id, modelo_codigo, puede_crear, pue
 (2, 'turnos', true, true, true, false, true, 'global'),
 (2, 'empleados', true, true, true, false, true, 'global'),
 (2, 'asistencias', false, true, false, false, true, 'global'),
-(2, 'seguridad', false, false, false, false, false, 'ninguno')
+(2, 'seguridad', false, false, false, false, false, 'ninguno'),
+(2, 'dispositivos', false, true, false, false, true, 'global')
 ON CONFLICT (rol_id, modelo_codigo) DO NOTHING;
 
 -- SUPERVISOR_SEDE: Limitado a su sede asignada
@@ -294,7 +323,8 @@ INSERT INTO public.rol_politicas_modelo (rol_id, modelo_codigo, puede_crear, pue
 (3, 'turnos', false, true, false, false, false, 'global'),
 (3, 'empleados', true, true, true, false, true, 'sede'),
 (3, 'asistencias', false, true, false, false, true, 'sede'),
-(3, 'seguridad', false, false, false, false, false, 'ninguno')
+(3, 'seguridad', false, false, false, false, false, 'ninguno'),
+(3, 'dispositivos', false, true, false, false, false, 'sede')
 ON CONFLICT (rol_id, modelo_codigo) DO NOTHING;
 
 -- AUDITOR: Solo lectura y exportación
@@ -305,7 +335,8 @@ INSERT INTO public.rol_politicas_modelo (rol_id, modelo_codigo, puede_crear, pue
 (4, 'turnos', false, true, false, false, true, 'global'),
 (4, 'empleados', false, true, false, false, true, 'global'),
 (4, 'asistencias', false, true, false, false, true, 'global'),
-(4, 'seguridad', false, true, false, false, true, 'global')
+(4, 'seguridad', false, true, false, false, true, 'global'),
+(4, 'dispositivos', false, true, false, false, true, 'global')
 ON CONFLICT (rol_id, modelo_codigo) DO NOTHING;
 
 -- 4. Usuarios Administradores Iniciales (Password hash SHA-256 de 'Admin2026!*' y 'RapturePass123')
